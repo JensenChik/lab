@@ -1,0 +1,3 @@
+[jd]
+sql_conn = mysql+mysqldb://name:password@host:port/db_name?charset=utf8
+url = http://so.m.jd.com/ware/searchList.action
