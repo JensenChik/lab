@@ -2,3 +2,10 @@
 sql_conn = mysql+mysqldb://name:password@host:port/db_name?charset=utf8
 url = http://so.m.jd.com/ware/searchList.action
 max_iter = 1000
+
+
+[lagou]
+sql_conn = mysql+mysqldb://name:password@host:port/db_name?charset=utf8
+company_url = https://www.lagou.com/gongsi/0-0-0.json
+max_iter = 2000
+
