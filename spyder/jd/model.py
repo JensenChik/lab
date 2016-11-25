@@ -52,5 +52,4 @@ engine = create_engine(DATABASE_URI, pool_recycle=3600, encoding='utf-8')
 DBSession = sessionmaker(engine)
 
 if __name__ == '__main__':
-    BaseModel.metadata.drop_all(engine)
     BaseModel.metadata.create_all(engine)
