@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 import time
 import json
+from random import choice
 
 cf = ConfigParser.ConfigParser()
 cf.read('config.ini')
@@ -30,23 +31,36 @@ class IP(BaseModel):
     rank = Column(Integer)
 
     def to_proxy(self):
-        return {self.url.split(':')[0]: self.url}
+        return {'http': self.url}
 
 
 def update_ip_pool(session):
+    def get(i):
+        valid_ip = session.query(IP).order_by(IP.rank).limit(PAGE_NUM*3).all()
+        proxies = None if valid_ip == [] else choice(valid_ip).to_proxy()
+        print '使用代理{}抓取第{}页'.format(proxies, i)
+        try:
+            req = requests.get('http://ip84.com/dl/{}'.format(page + 1), proxies=proxies, timeout=5)
+        except Exception:
+            req = None
+        return None if req is None or req.status_code != 200 or req.content == 'block' else req.content
+    run_count = 0
     print 'ip池供应不足，开始更新ip池'
     for page in range(PAGE_NUM):
-        print '抓取第{}页'.format(page)
-        content = requests.get('http://ip84.com/dlgn/{}'.format(page + 1)).content
+        run_count += 1
+        content = get(page)
+        while content is None:
+            content = get(page)
         html = BeautifulSoup(content, 'lxml')
         for tr in html.find_all('tr'):
             td = tr.find_all('td')
-            if not td: continue
-            url = "{}://{}:{}".format(td[4].text.lower(), td[0].text, td[1].text)
+            if not td or len(td) < 5 or td[4].text != 'HTTP': continue
+            url = "http://{}:{}".format(td[0].text, td[1].text)
             ip = IP(url=url, create_time=datetime.now())
-            if session.query(IP).filter_by(url=ip).first() is None:
+            if session.query(IP).filter_by(url=url).first() is None:
                 session.add(ip)
         session.commit()
+        if run_count > 100: break
         time.sleep(3)
 
 
@@ -60,6 +74,7 @@ def check_and_rank_ip(session):
             respond = requests.post('http://so.m.jd.com/ware/searchList.action',
                                     data={'_format_': 'json', 'stock': 1, 'page': 1, 'keyword': '手机'},
                                     proxies=ip.to_proxy(), timeout=5).content
+            # respond = requests.get('http://nazgrim.com/{}'.format(ip.url), proxies=ip.to_proxy(), timeout=5).content
             json.loads(respond)
             print respond[:50]
             ip.rank = int(100 * (time.time() - t))
