@@ -21,10 +21,11 @@ if __name__ == '__main__':
         param['page'] += 1
         req = requests.post(url, data=param)
         info = json.loads(json.loads(req.content)['value'])
-        ware_list = info['wareList']
+        ware_list = info['wareList']['wareList']
+        total_count = info['wareList']['wareCount']
         ware_count += len(ware_list)
         print log.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), keyword, param['page'],
-                         len(ware_list), info['wareCount'], ware_count)
+                         len(ware_list), total_count, ware_count)
         for ware in ware_list:
             w = Ware(
                 key_word=keyword,
@@ -39,17 +40,17 @@ if __name__ == '__main__':
                 pre_sale=str(ware['preSale']),
                 total_count=str(ware['totalCount']),
                 good=str(ware['good']),
-                sams_tag=str(ware['samsTag']),
-                sams_price=str(ware['samsPrice']),
+                sams_tag=None,
+                sams_price=None,
                 eBook_flag=str(ware['eBookFlag']),
                 can_free_read=str(ware['canFreeRead']),
-                promotion_flag=str(ware['promotionFlag']).replace("u'", "'"),
+                promotion_flag=None,
                 m_promotion_id=str(ware['mPromotionId']),
                 is_booking=str(ware['isBooking']),
-                dis_price=str(ware['disPrice']),
-                cid1=str(ware['cid1']),
-                cid2=str(ware['cid2']),
-                cat_id=str(ware['catid']),
+                dis_price=None,
+                cid1=None,
+                cid2=None,
+                cat_id=None,
                 up_to_saving=str(ware['upToSaving']),
                 eche=str(ware['eche']),
                 author=str(ware['author']),
@@ -63,6 +64,6 @@ if __name__ == '__main__':
             session.add(w)
         session.commit()
         session.close()
-        if ware_count >= int(info['wareCount']): break
+        if ware_count >= int(total_count): break
         time.sleep(3)
     print '抓取完毕'
