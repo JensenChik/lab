@@ -71,34 +71,38 @@ def update_ip_pool(session):
 
 # 将ip按响应时间排序，并返回当前可用的ip数量
 def check_and_rank_ip(session):
-    valid_ip = []
-    all_ip = session.query(IP).all()
-    # todo:多线程校验
-    for ip in all_ip:
+    def ping_jd(ip):
         t = time.time()
         try:
-            print ip.to_proxy(),
             respond = requests.post('http://so.m.jd.com/ware/searchList.action',
                                     data={'_format_': 'json', 'stock': 1, 'page': 1, 'keyword': '手机'},
                                     proxies=ip.to_proxy(), timeout=5).content
-            # respond = requests.get('http://nazgrim.com/{}'.format(ip.url), proxies=ip.to_proxy(), timeout=5).content
             json.loads(respond)
-            print respond[:50]
             ip.rank = int(100 * (time.time() - t))
-            valid_ip.append(ip)
-        except Exception, e:
-            print type(e)
-            session.delete(ip)
-        session.commit()
-    return len(valid_ip)
+        except Exception:
+            ip.rank = None
+        return ip
+
+    print '开始判断ip活性'
+    from multiprocessing.dummy import Pool as ThreadPool
+    all_ip = session.query(IP).all()
+    pool = ThreadPool(100)
+    ips = pool.map(ping_jd, all_ip)
+    for ip in ips:
+        session.add(ip)
+    session.query(IP).filter(IP.rank == None).delete()
+    session.commit()
+    pool.close()
+    pool.join()
+    return session.query(IP).count()
 
 
 def serve():
     while True:
         session = DBSession()
         valid_ip_count = check_and_rank_ip(session)
+        print '当前可用ip数量为:', valid_ip_count
         if valid_ip_count < POOL_SIZE:
-            print '当前可用ip数量为:', valid_ip_count
             update_ip_pool(session)
         session.close()
         time.sleep(HEART_BEAT)
