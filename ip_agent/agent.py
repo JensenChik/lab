@@ -34,19 +34,25 @@ class IP(BaseModel):
         return {'http': self.url}
 
 
+# 更新ip池
 def update_ip_pool(session):
+    # 抓取第i页的IP
     def get(i):
-        valid_ip = session.query(IP).order_by(IP.rank).limit(PAGE_NUM*3).all()
+        valid_ip = session.query(IP).filter(IP.rank != None).order_by(IP.rank).limit(PAGE_NUM*3).all()
         proxies = None if valid_ip == [] else choice(valid_ip).to_proxy()
         print '使用代理{}抓取第{}页'.format(proxies, i)
         try:
-            req = requests.get('http://ip84.com/dl/{}'.format(page + 1), proxies=proxies, timeout=5)
+            headers = requests.utils.default_headers()
+            headers.update({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'})
+            req = requests.get('http://www.xicidaili.com/nn/{}'.format(i), proxies=proxies, timeout=5, headers=headers)
         except Exception:
             req = None
+        time.sleep(3)
         return None if req is None or req.status_code != 200 or req.content == 'block' else req.content
+
     run_count = 0
     print 'ip池供应不足，开始更新ip池'
-    for page in range(PAGE_NUM):
+    for page in range(1, PAGE_NUM):
         run_count += 1
         content = get(page)
         while content is None:
@@ -54,19 +60,20 @@ def update_ip_pool(session):
         html = BeautifulSoup(content, 'lxml')
         for tr in html.find_all('tr'):
             td = tr.find_all('td')
-            if not td or len(td) < 5 or td[4].text != 'HTTP': continue
-            url = "http://{}:{}".format(td[0].text, td[1].text)
+            if not td or td[5].text != 'HTTP': continue
+            url = "http://{}:{}".format(td[1].text, td[2].text)
             ip = IP(url=url, create_time=datetime.now())
             if session.query(IP).filter_by(url=url).first() is None:
                 session.add(ip)
         session.commit()
         if run_count > 100: break
-        time.sleep(3)
 
 
+# 将ip按响应时间排序，并返回当前可用的ip数量
 def check_and_rank_ip(session):
     valid_ip = []
     all_ip = session.query(IP).all()
+    # todo:多线程校验
     for ip in all_ip:
         t = time.time()
         try:
@@ -91,6 +98,7 @@ def serve():
         session = DBSession()
         valid_ip_count = check_and_rank_ip(session)
         if valid_ip_count < POOL_SIZE:
+            print '当前可用ip数量为:', valid_ip_count
             update_ip_pool(session)
         session.close()
         time.sleep(HEART_BEAT)
