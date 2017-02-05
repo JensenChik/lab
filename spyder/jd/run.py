@@ -4,28 +4,38 @@ import requests
 import json
 import time
 from datetime import datetime
-from config import url, max_iter
-from model import DBSession, Ware
 
-reload(sys)
-sys.setdefaultencoding('utf-8')
+sys.path.append('..')
+from spyder.config import DBSession, JD_max_iter, JD_url, logger, ip_pool
+from spyder.model import JDWare as Ware
+
+
+def get(p):
+    param = {'_format_': 'json', 'stock': 1, 'page': p, 'keyword': keyword}
+    try:
+        req = requests.post(JD_url, data=param, proxies=ip_pool.gen_proxies(), timeout=10)
+        respond = json.loads(json.loads(req.content)['value']) if req.status_code == 200 else None
+    except Exception:
+        respond = None
+    time.sleep(1)
+    return respond
+
 
 if __name__ == '__main__':
     keyword = sys.argv[1]
     page = 0 if len(sys.argv) == 2 else sys.argv[2]
-    param = {'_format_': 'json', 'stock': 1, 'page': page, 'keyword': keyword}
-    log = "[{}]\t抓取 {} 第 {} 页完毕, 当前页商品个数{}, 总商品个数{}, 累计已抓{}"
+    log = "抓取 {} 第 {} 页完毕, 当前页商品个数{}, 总商品个数{}, 累计已抓{}"
     ware_count = 0
-    for i in range(max_iter):
+    for i in range(JD_max_iter):
         session = DBSession()
-        param['page'] += 1
-        req = requests.post(url, data=param)
-        info = json.loads(json.loads(req.content)['value'])
+        page += 1
+        info = get(page)
+        while info is None:
+            info = get(page)
         ware_list = info['wareList']['wareList']
         total_count = info['wareList']['wareCount']
         ware_count += len(ware_list)
-        print log.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), keyword, param['page'],
-                         len(ware_list), total_count, ware_count)
+        logger.warning(log.format(keyword, page, len(ware_list), total_count, ware_count))
         for ware in ware_list:
             w = Ware(
                 key_word=keyword,
@@ -65,5 +75,4 @@ if __name__ == '__main__':
         session.commit()
         session.close()
         if ware_count >= int(total_count): break
-        time.sleep(3)
     print '抓取完毕'
