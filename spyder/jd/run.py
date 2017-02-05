@@ -4,8 +4,9 @@ import requests
 import json
 import time
 from datetime import datetime
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
 from spyder.config import DBSession, JD_max_iter, JD_url, logger, ip_pool
 from spyder.model import JDWare as Ware
 
