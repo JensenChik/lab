@@ -57,7 +57,7 @@ def update_ip_pool(session):
         content = get(page)
         while content is None:
             content = get(page)
-        html = BeautifulSoup(content, 'lxml')
+        html = BeautifulSoup(content, 'html.parser')
         for tr in html.find_all('tr'):
             td = tr.find_all('td')
             if not td or td[5].text != 'HTTP': continue
