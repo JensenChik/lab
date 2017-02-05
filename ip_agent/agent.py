@@ -11,6 +11,7 @@ from datetime import datetime
 import time
 import json
 from random import choice
+import datetime
 
 cf = ConfigParser.ConfigParser()
 cf.read('config.ini')
@@ -51,7 +52,7 @@ def update_ip_pool(session):
         return None if req is None or req.status_code != 200 or req.content == 'block' else req.content
 
     run_count = 0
-    print 'ip池供应不足，开始更新ip池'
+    print datetime.datetime.now(), 'ip池供应不足，开始更新ip池'
     for page in range(1, PAGE_NUM):
         run_count += 1
         content = get(page)
@@ -83,7 +84,7 @@ def check_and_rank_ip(session):
             ip.rank = None
         return ip
 
-    print '开始判断ip活性'
+    print datetime.datetime.now(), '开始判断ip活性'
     from multiprocessing.dummy import Pool as ThreadPool
     all_ip = session.query(IP).all()
     pool = ThreadPool(100)
@@ -98,14 +99,16 @@ def check_and_rank_ip(session):
 
 
 def serve():
-    while True:
+    current_time = datetime.datetime.now()
+    while current_time.hour != 23 and current_time.minute != 59:
         session = DBSession()
         valid_ip_count = check_and_rank_ip(session)
-        print '当前可用ip数量为:', valid_ip_count
+        print datetime.datetime.now(), '当前可用ip数量为:', valid_ip_count
         if valid_ip_count < POOL_SIZE:
             update_ip_pool(session)
         session.close()
         time.sleep(HEART_BEAT)
+        current_time = datetime.datetime.now()
 
 
 if __name__ == '__main__':
