@@ -40,7 +40,7 @@ def update_ip_pool(session):
     def get(i):
         valid_ip = session.query(IP).filter(IP.rank != None).order_by(IP.rank).limit(PAGE_NUM*3).all()
         proxies = None if valid_ip == [] else choice(valid_ip).to_proxy()
-        print '使用代理{}抓取第{}页'.format(proxies, i)
+        # print '使用代理{}抓取第{}页'.format(proxies, i)
         try:
             headers = requests.utils.default_headers()
             headers.update({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'})
@@ -113,4 +113,7 @@ if __name__ == '__main__':
     if action == 'initdb':
         BaseModel.metadata.create_all(engine)
     elif action == 'serve':
-        serve()
+        try:
+            serve()
+        except Exception, e:
+            print e
