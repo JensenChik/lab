@@ -16,6 +16,7 @@ while len(hour_list) != 0:
             req = requests.get('http://m.baidu.com/s?word=ip')
             html = BeautifulSoup(req.content, 'html.parser')
             ip = html.find_all(text=re.compile(u'本机IP:'))[0].split(':')[-1]
+            print datetime.datetime.now(), ip
             status, info = commands.getstatusoutput("ssh root@conj.space 'cd /home/env; python update_ip.py %s'" % ip)
             if status != 0:
                 print status, info
