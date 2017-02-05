@@ -13,3 +13,9 @@ class IP(BaseModel):
 
     def to_proxy(self):
         return {'http': self.url}
+
+
+if __name__ == '__main__':
+    from config import engine
+
+    BaseModel.metadata.create_all(engine)
