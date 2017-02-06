@@ -12,7 +12,10 @@ class IP(BaseModel):
     rank = Column(Integer)
 
     def to_proxy(self):
-        return {'http': self.url}
+        return {
+            'http': self.url,
+            'https': self.url
+        }
 
 
 if __name__ == '__main__':
