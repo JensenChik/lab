@@ -17,6 +17,7 @@ cf.read(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'config.ini'))
 
 # 基本配置
 DATABASE_URI = cf.get('base', 'sql_uri')
+User_Agent = cf.get('base', 'user_agent')
 engine = create_engine(DATABASE_URI, pool_recycle=3600, encoding='utf-8')
 DBSession = sessionmaker(engine)
 logging.basicConfig(
@@ -33,6 +34,7 @@ JD_max_iter = int(cf.get('jd', 'max_iter'))
 
 # 拉勾配置
 lagou_company_url = cf.get('lagou', 'company_url')
+lagou_company_cookie = cf.get('lagou', 'company_cookie')
 lagou_job_url = cf.get('lagou', 'company_url')
 lagou_max_iter = int(cf.get('lagou', 'max_iter'))
 lagou_city_json = json.loads(cf.get('lagou', 'city_json'))
