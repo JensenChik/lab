@@ -34,7 +34,6 @@ JD_max_iter = int(cf.get('jd', 'max_iter'))
 
 # 拉勾配置
 lagou_company_url = cf.get('lagou', 'company_url')
-lagou_company_cookie = cf.get('lagou', 'company_cookie')
 lagou_job_url = cf.get('lagou', 'company_url')
 lagou_max_iter = int(cf.get('lagou', 'max_iter'))
 lagou_city_json = json.loads(cf.get('lagou', 'city_json'))
