@@ -14,7 +14,6 @@ import logging
 class Producer:
     # 更新ip池
     def __init__(self):
-        self.begin_time = datetime.now()
         logging.basicConfig(
             level=logging.WARNING,
             format='[%(levelname)s]\t%(asctime)s\t%(message)s',
@@ -85,7 +84,8 @@ class Producer:
 
     def serve(self):
         self.logger.warning('开始服务')
-        while (datetime.now() - self.begin_time).days == 0:
+        now = datetime.now()
+        while not (now.hour == 23 and now.minute >= 30):
             session = DBSession()
             valid_ip_count = self._check_and_rank_ip(session)
             self.logger.warning('当前可用ip数量为: {}'.format(valid_ip_count))
