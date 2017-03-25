@@ -126,4 +126,5 @@ class AutoHomeCar(BaseModel):
 
 
 if __name__ == '__main__':
+    from config import engine
     BaseModel.metadata.create_all(engine)
