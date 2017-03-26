@@ -50,7 +50,7 @@ if __name__ == '__main__':
                 available_in_store=str(ware['availableInStore']),
                 pre_sale=str(ware['preSale']),
                 total_count=str(ware['totalCount']),
-                good=str(ware['good']),
+                good=str(ware.get('good')),
                 sams_tag=None,
                 sams_price=None,
                 eBook_flag=str(ware['eBookFlag']),
