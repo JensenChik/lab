@@ -61,7 +61,7 @@ class Producer:
         def ping_jd(ip):
             t = time.time()
             try:
-                respond = requests.post('http://so.m.jd.com/ware/searchList.action',
+                respond = requests.post('https://so.m.jd.com/ware/searchList.action',
                                         data={'_format_': 'json', 'stock': 1, 'page': 1, 'keyword': '手机'},
                                         proxies=ip.to_proxy(), timeout=5).content
                 json.loads(respond)
