@@ -3,7 +3,7 @@ sql_uri = mysql+mysqldb://user:passwd@host:port/database?charset=utf8
 user_agent = Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36
 
 [jd]
-url = http://so.m.jd.com/ware/searchList.action
+url = https://so.m.jd.com/ware/searchList.action
 max_iter = 2000
 
 
