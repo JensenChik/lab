@@ -235,9 +235,3 @@ class Data5U(Source):
                 if port is None or port == 80: continue
                 url.append("http://{}:{}".format(cell[0].text, port))
         return url
-
-web = QuanMin()
-url = web.get()
-print url
-
-
