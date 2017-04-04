@@ -40,7 +40,7 @@ class Producer:
             YunDaiLi(style=1), YunDaiLi(style=2), YunDaiLi(style=3), YunDaiLi(style=4),
             YunHai(style=1), YunHai(style=2), YunHai(style=3), YunHai(style=4),
         ]
-        self._heart_beat = 10
+        self._heart_beat = 600
 
     def _dump(self):
         print 'start to get ip from source'
@@ -77,5 +77,6 @@ class Producer:
             time.sleep(self._heart_beat)
 
 
-producer = Producer()
-producer.serve()
+if __name__ == '__main__':
+    producer = Producer()
+    producer.serve()
