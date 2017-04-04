@@ -59,7 +59,7 @@ class XiCi(Source):
 
     def get(self):
         url = []
-        page_range = {'nn': range(1, 11), 'nt': range(1, 2), 'wt': range(10)}
+        page_range = {'nn': range(1, 11), 'nt': range(1, 2), 'wt': range(1, 10)}
         for page in page_range[self.style]:
             content = self.request(self.url.format(page=page))
             html = BeautifulSoup(content, 'html.parser')
