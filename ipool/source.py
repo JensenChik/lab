@@ -45,6 +45,7 @@ class Source:
 class XiCi(Source):
     def __init__(self, style, style_tips=['nt', 'nn', 'wt']):
         Source.__init__(self)
+        self.style = style
         self.url = 'http://www.xicidaili.com/{style}/{page}'.format(style=style, page='{page}')
 
     @return_none_when_exception
@@ -58,7 +59,8 @@ class XiCi(Source):
 
     def get(self):
         url = []
-        for page in range(1, 6):
+        page_range = {'nn': range(1, 11), 'nt': range(1, 2), 'wt': range(10)}
+        for page in page_range[self.style]:
             content = self.request(self.url.format(page=page))
             html = BeautifulSoup(content, 'html.parser')
             url += self._extract(html) or []
