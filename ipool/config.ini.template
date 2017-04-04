@@ -1,0 +1,3 @@
+[param]
+db_uri = mysql+mysqldb://user:password@host:port/database?charset=utf8
+pool_url = localhost:13579

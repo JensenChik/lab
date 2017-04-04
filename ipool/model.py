@@ -6,16 +6,18 @@ BaseModel = declarative_base()
 
 class IP(BaseModel):
     __tablename__ = 'ip'
-    id = Column(Integer, primary_key=True)
-    url = Column(String(35), unique=True)
-    create_time = Column(DateTime)
-    rank = Column(Integer)
+    url = Column(String(35), unique=True, primary_key=True)
+    update_time = Column(DateTime)
+    speed = Column(Integer)
 
     def to_proxy(self):
         return {
             'http': self.url,
             'https': self.url
         }
+
+    def __repr__(self):
+        return '{}\t{}\t{}'.format(self.url, self.update_time, self.speed)
 
 
 if __name__ == '__main__':
