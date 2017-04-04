@@ -3,7 +3,9 @@ import re
 import requests
 import time
 from bs4 import BeautifulSoup
-from config import DBSession, return_none_when_exception, repeat_while_return_none
+from config import DATABASE_URI, return_none_when_exception, repeat_while_return_none
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from model import IP
 from random import choice
 
@@ -27,6 +29,8 @@ class Source:
     @repeat_while_return_none
     @return_none_when_exception
     def request(self, url):
+        engine = create_engine(DATABASE_URI, pool_recycle=3600, encoding='utf-8')
+        DBSession = sessionmaker(engine)
         session = DBSession()
         valid_ip = session.query(IP).all()
         proxy = None if valid_ip == [] else choice(valid_ip).to_proxy()

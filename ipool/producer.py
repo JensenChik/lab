@@ -1,7 +1,9 @@
 # coding=utf-8
 from source import XiCi, SixSix, QuanMin, CooBoBo, YunDaiLi, YunHai, Data5U
 from model import IP
-from config import DBSession
+from config import DATABASE_URI
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import multiprocessing
 import time
@@ -56,6 +58,9 @@ class Producer:
         print 'ping JD finish, valid ip count:', len(filter(lambda x: x is not None, ip_list))
 
         print 'start to dump ip to mysql'
+
+        engine = create_engine(DATABASE_URI, pool_recycle=3600, encoding='utf-8')
+        DBSession = sessionmaker(engine)
         session = DBSession()
         session.query(IP).delete()
         for ip in filter(lambda x: x is not None, ip_list):
