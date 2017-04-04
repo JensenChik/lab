@@ -54,7 +54,7 @@ class XiCi(Source):
 
     def get(self):
         url = []
-        for page in range(1, 11):
+        for page in range(1, 6):
             content = self.request(self.url.format(page=page))
             html = BeautifulSoup(content, 'html.parser')
             url += self._extract(html) or []
