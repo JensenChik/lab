@@ -38,7 +38,6 @@ def check_ware_count(keyword):
 
 if __name__ == '__main__':
     keyword = sys.argv[1]
-    page = 0 if len(sys.argv) == 2 else sys.argv[2]
     batch_size = 25
     ware_list = []
     ware_count = check_ware_count(keyword)
