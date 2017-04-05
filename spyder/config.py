@@ -6,18 +6,18 @@ import ConfigParser
 import json
 import os
 import logging
+import requests
 
 reload(sys)
 sys.setdefaultencoding('utf-8')
-sys.path.append('..')
-from ip_agent import Consumer
 
 cf = ConfigParser.ConfigParser()
 cf.read(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'config.ini'))
 
 # 基本配置
-DATABASE_URI = cf.get('base', 'sql_uri')
-User_Agent = cf.get('base', 'user_agent')
+DATABASE_URI = cf.get('base', 'db_uri')
+POOL_URL = cf.get('base', 'pool_url')
+HEADER = json.loads(cf.get('base', 'header'))
 engine = create_engine(DATABASE_URI, pool_recycle=3600, encoding='utf-8')
 DBSession = sessionmaker(engine)
 logging.basicConfig(
@@ -26,7 +26,12 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger()
-ip_pool = Consumer()
+
+
+def get_proxy():
+    proxy = requests.get(POOL_URL).content
+    return None if proxy == 'None' else json.loads(proxy)
+
 
 # 京东配置
 JD_url = cf.get('jd', 'url')
