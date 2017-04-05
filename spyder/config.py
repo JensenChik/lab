@@ -33,6 +33,29 @@ def get_proxy():
     return None if proxy == 'None' else json.loads(proxy)
 
 
+class return_none_when_exception:
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, *args, **kwargs):
+        try:
+            result = self.func(*args, **kwargs)
+        except Exception:
+            result = None
+        return result
+
+
+class repeat_while_return_none:
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, *args, **kwargs):
+        result = self.func(*args, **kwargs)
+        while result is None:
+            result = self.func(*args, **kwargs)
+        return result
+
+
 # 京东配置
 JD_url = cf.get('jd', 'url')
 JD_max_iter = int(cf.get('jd', 'max_iter'))
