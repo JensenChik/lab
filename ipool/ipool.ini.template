@@ -1,0 +1,30 @@
+[db]
+uri = mysql+mysqldb://user:password@host:port/database?charset=utf8
+
+[ipoolserver]
+host = 0.0.0.0
+port = 13579
+
+[uwsgi]
+http = 0.0.0.0:13579
+chdir = /path/to/ipool
+wsgi-file = server.py
+callable = app
+processes = 4
+threads = 2
+
+[program:ipoolserver]
+directory=/path/to/ipool
+command=env PATH="/path/to/your/python/bin" uwsgi ipool.ini
+user=root
+autostart=true
+autorestart=true
+die-on-term=true
+
+[program:producer]
+directory=/path/to/ipool
+command=env PATH="/path/to/your/python/bin" python producer.py
+user=root
+autostart=true
+autorestart=true
+die-on-term=true
