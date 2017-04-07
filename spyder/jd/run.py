@@ -21,7 +21,7 @@ def get(param):
     req = requests.post(JD_url, data=param, proxies=proxy, headers=HEADER, timeout=5)
     if req.status_code != 200: raise Exception('error return code')
     info = json.loads(json.loads(req.content).get('value'))
-    print 'get ware {} in page {} by {} done'.format(keyword, page, proxy)
+    print 'get ware {} in page {} by {} done'.format(keyword, page, proxy.get('http'))
     time.sleep(4)
     return [Ware(key_word=keyword, json=json.dumps(ware, ensure_ascii=False), create_time=datetime.now())
             for ware in info.get('wareList').get('wareList') or []]
