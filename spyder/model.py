@@ -7,7 +7,7 @@ BaseModel = declarative_base()
 class JDWare(BaseModel):
     __tablename__ = 'jd_ware'
     id = Column(Integer, primary_key=True)
-    key_word = Column(Text)
+    key_word = Column(Text, index=True)
     json = Column(Text)
     create_time = Column(DateTime)
 
