@@ -23,7 +23,7 @@ def get(param):
     info = json.loads(json.loads(req.content).get('value'))
     print 'get ware {} in page {} by {} done'.format(keyword, page, proxy.get('http'))
     time.sleep(4)
-    return [Ware(key_word=keyword, json=json.dumps(ware, ensure_ascii=False), create_time=datetime.now())
+    return [Ware(key_word=keyword, json=json.dumps(ware, ensure_ascii=False), create_date=datetime.date(datetime.now()))
             for ware in info.get('wareList').get('wareList') or []]
 
 
