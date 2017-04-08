@@ -1,5 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Text, DateTime, Integer, String
+from sqlalchemy import Column, Text, DateTime, Integer, String, Date
 
 BaseModel = declarative_base()
 
@@ -9,7 +9,7 @@ class JDWare(BaseModel):
     id = Column(Integer, primary_key=True)
     key_word = Column(String(32), index=True)
     json = Column(Text)
-    create_time = Column(DateTime)
+    create_date = Column(Date, index=True)
 
     def __repr__(self):
         return self.id
