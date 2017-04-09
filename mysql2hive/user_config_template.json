@@ -1,7 +1,27 @@
 {
-    "source": {
-
+    "mysql": {
+        "db": "db define in meta.json",
+        "table": "table in db",
+        "incremental": "append or lastmodified",
+        "check-column": "column name for incremental",
+        "last-value": "python eval, e.g datetime.date(datetime.now())",
+        "columns": [
+            "column",
+            "name",
+            "you",
+            "needed"
+        ]
     },
-    "target": {
+    "hive": {
+        "db": "hive database name",
+        "table": "hive table name",
+        "partition": {
+            "partition name": "partition value, python eval, e.g datetime.date(datetime.now())"
+        },
+        "overwrite": true,
+        "compress": true,
+        "compression_codec": null,
+        "num-mappers": 1,
+        "split-by": "split by column name"
     }
 }
