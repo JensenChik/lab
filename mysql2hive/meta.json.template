@@ -1,15 +1,16 @@
 {
-    "connector": "jdbc",
-    "data_bases": {
-        "database_1": {
+    "databases": {
+        "db_name_1": {
             "host": "xxx.xxx.xx.xx",
             "port": "3306",
+            "username":"xxx",
             "password": "xxxxx",
             "dbname":"xxxx"
         },
-        "database_2": {
+        "db_name_2": {
             "host": "xxx.xxx.xx.xx",
             "port": "xxxx",
+            "username": "xxx",
             "password": "xxx",
             "dbneme":""
         },
