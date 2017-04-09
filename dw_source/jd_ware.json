@@ -1,0 +1,26 @@
+{
+    "mysql": {
+        "db": "spyder",
+        "table": "jd_ware",
+        "incremental": "append",
+        "check-column": "create_date",
+        "last-value": "datetime.date(datetime.now())",
+        "columns": [
+            "id",
+            "key_word",
+            "json"
+        ]
+    },
+    "hive": {
+        "db": "dw_source",
+        "table": "ware",
+        "partition": {
+            "create_date": "datetime.date(datetime.now())"
+        },
+        "overwrite": true,
+        "compress": true,
+        "compression_codec": null,
+        "num-mappers": 1,
+        "split-by": "id"
+    }
+}
