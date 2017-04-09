@@ -1,0 +1,18 @@
+{
+    "connector": "jdbc",
+    "data_bases": {
+        "database_1": {
+            "host": "xxx.xxx.xx.xx",
+            "port": "3306",
+            "password": "xxxxx",
+            "dbname":"xxxx"
+        },
+        "database_2": {
+            "host": "xxx.xxx.xx.xx",
+            "port": "xxxx",
+            "password": "xxx",
+            "dbneme":""
+        },
+        "如果你有更多的数据库只需要再后面补充即可": "...."
+    }
+}

@@ -48,3 +48,4 @@ Temporary Items
 *.iml
 *.log
 *.ini
+mysql2hive/meta.json
