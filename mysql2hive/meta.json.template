@@ -1,4 +1,8 @@
 {
+    "HADOOP_HOME": "/path/to/hadoop",
+    "HIVE_HOME": "/path/to/hive",
+    "JAVA_HOME": "/path/to/java",
+    "SQOOP_HOME": "/path/to/sqoop",
     "databases": {
         "db_name_1": {
             "host": "xxx.xxx.xx.xx",
