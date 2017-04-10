@@ -2,9 +2,9 @@
     "mysql": {
         "db": "spyder",
         "table": "jd_ware",
-        "incremental": "append",
+        "incremental": "lastmodified",
         "check-column": "create_date",
-        "last-value": "datetime.date(datetime.now())",
+        "last-value": "date.today()",
         "columns": [
             "id",
             "key_word",
@@ -13,9 +13,9 @@
     },
     "hive": {
         "db": "dw_source",
-        "table": "ware",
+        "table": "jd_ware",
         "partition": {
-            "create_date": "datetime.date(datetime.now())"
+            "create_date": "date.today()"
         },
         "overwrite": true,
         "compress": true,
