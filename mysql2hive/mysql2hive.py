@@ -47,7 +47,8 @@ compression_codec = config['hive'].get('compression_codec')
 num_mappers = config['hive'].get('num-mappers')
 split_by = config['hive'].get('split-by')
 
-cmd = """/home/sqoop/bin/sqoop import --hive-import --hive-drop-import-delims
+cmd = """env PATH=$PATH HADOOP_HOME=$HADOOP_HOME JAVA_HOME=$JAVA_HOME
+sqoop import --hive-import --hive-drop-import-delims
 {# mysql连接属性 #}
 --connect {{ connect }}
 --username {{ username }}
