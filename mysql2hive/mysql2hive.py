@@ -111,7 +111,11 @@ cmd = jinja2.Template(cmd).render(
     compress=compress,
     compression_codec=compression_codec,
     num_mappers=num_mappers,
-    overwrite=overwrite
+    overwrite=overwrite,
+    HADOOP_HOME=HADOOP_HOME,
+    JAVA_HOME=JAVA_HOME,
+    SQOOP_HOME=SQOOP_HOME,
+    HIVE_HOME=HIVE_HOME
 ).replace('\n', ' ')
 
 print '\n', cmd, '\n'
