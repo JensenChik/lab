@@ -12,6 +12,12 @@ sys.setdefaultencoding('utf8')
 meta = json.load(open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'meta.json')))
 config = json.load(open(sys.argv[1]))
 
+HADOOP_HOME = meta['HADOOP_HOME']
+HIVE_HOME = meta['HIVE_HOME']
+JAVA_HOME = meta['JAVA_HOME']
+SQOOP_HOME = meta['SQOOP_HOME']
+
+
 db_info = meta['databases'][config['mysql']['db']]
 connect = "jdbc:mysql://{host}:{port}/{db_name}".format(
     host=db_info['host'],
@@ -47,8 +53,8 @@ compression_codec = config['hive'].get('compression_codec')
 num_mappers = config['hive'].get('num-mappers')
 split_by = config['hive'].get('split-by')
 
-cmd = """env PATH=$PATH HADOOP_HOME=$HADOOP_HOME JAVA_HOME=$JAVA_HOME HIVE_HOME=$HIVE_HOME
-sqoop import --hive-import --hive-drop-import-delims
+cmd = """env HADOOP_HOME={{ HADOOP_HOME }} JAVA_HOME={{ JAVA_HOME }} HIVE_HOME={{ HIVE_HOME }}
+{{ SQOOP_HOME }}/bin/sqoop import --hive-import --hive-drop-import-delims
 {# mysql连接属性 #}
 --connect {{ connect }}
 --username {{ username }}
@@ -108,6 +114,7 @@ cmd = jinja2.Template(cmd).render(
     overwrite=overwrite
 ).replace('\n', ' ')
 
+print '\n', cmd, '\n'
 status, output = commands.getstatusoutput(cmd)
 print output
 if status != 0: exit(1)
