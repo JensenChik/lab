@@ -2,7 +2,8 @@
 import json
 import os
 import jinja2
-from datetime import datetime
+from datetime import datetime, date, timedelta
+import commands
 import sys
 
 reload(sys)
@@ -106,4 +107,6 @@ cmd = jinja2.Template(cmd).render(
     overwrite=overwrite
 ).replace('\n', ' ')
 
-
+status, output = commands.getstatusoutput(cmd)
+print output
+if status != 0: exit(1)
