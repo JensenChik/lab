@@ -119,5 +119,4 @@ print '\n', cmd, '\n'
 env = {"HADOOP_HOME": HADOOP_HOME, "JAVA_HOME": JAVA_HOME, "HIVE_HOME": HIVE_HOME}
 process = Popen(cmd, shell=True, env=env)
 output = process.communicate()
-print output
 if process.returncode != 0: exit(1)
