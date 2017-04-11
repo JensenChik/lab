@@ -3,8 +3,8 @@ import json
 import os
 import jinja2
 from datetime import datetime, date, timedelta
-import commands
 import sys
+from subprocess import Popen
 
 reload(sys)
 sys.setdefaultencoding('utf8')
@@ -16,7 +16,6 @@ HADOOP_HOME = meta['HADOOP_HOME']
 HIVE_HOME = meta['HIVE_HOME']
 JAVA_HOME = meta['JAVA_HOME']
 SQOOP_HOME = meta['SQOOP_HOME']
-
 
 db_info = meta['databases'][config['mysql']['db']]
 connect = "jdbc:mysql://{host}:{port}/{db_name}".format(
@@ -53,7 +52,7 @@ compression_codec = config['hive'].get('compression_codec')
 num_mappers = config['hive'].get('num-mappers')
 split_by = config['hive'].get('split-by')
 
-cmd = """env HADOOP_HOME={{ HADOOP_HOME }} JAVA_HOME={{ JAVA_HOME }} HIVE_HOME={{ HIVE_HOME }}
+cmd = """
 {{ SQOOP_HOME }}/bin/sqoop import --hive-import --hive-drop-import-delims
 {# mysql连接属性 #}
 --connect {{ connect }}
@@ -112,13 +111,13 @@ cmd = jinja2.Template(cmd).render(
     compression_codec=compression_codec,
     num_mappers=num_mappers,
     overwrite=overwrite,
-    HADOOP_HOME=HADOOP_HOME,
-    JAVA_HOME=JAVA_HOME,
-    SQOOP_HOME=SQOOP_HOME,
-    HIVE_HOME=HIVE_HOME
+    SQOOP_HOME=SQOOP_HOME
 ).replace('\n', ' ')
 
 print '\n', cmd, '\n'
-status, output = commands.getstatusoutput(cmd)
+
+env = {"HADOOP_HOME": HADOOP_HOME, "JAVA_HOME": JAVA_HOME, "HIVE_HOME": HIVE_HOME}
+process = Popen(cmd, shell=True, env=env)
+output = process.communicate()
 print output
-if status != 0: exit(1)
+if process.returncode != 0: exit(1)
