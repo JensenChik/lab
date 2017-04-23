@@ -29,7 +29,7 @@ def get(param):
 if __name__ == '__main__':
     print 'start to get wow auction house data'
 
-    pool = multiprocessing.Pool(processes=4)
+    pool = multiprocessing.Pool(processes=20)
     data = reduce(
         lambda x, y: x + y,
         pool.map(
