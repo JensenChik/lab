@@ -15,6 +15,17 @@ class JDWare(BaseModel):
         return self.id
 
 
+class AuctionWare(BaseModel):
+    __tablename__ = 'auction_ware'
+    id = Column(Integer, primary_key=True)
+    realm = Column(String(32), index=True)
+    json = Column(Text)
+    create_date = Column(Date, index=True)
+
+    def __repr__(self):
+        return self.id
+
+
 class LagouCompany(BaseModel):
     __tablename__ = 'lagou_company'
     id = Column(Integer, primary_key=True)
