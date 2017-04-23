@@ -72,3 +72,6 @@ lagou_domain_json = json.loads(cf.get('lagou', 'domain_json'))
 autohome_car_url = cf.get('autohome', 'car_url')
 autohome_max_iter = int(cf.get('autohome', 'max_iter'))
 autohome_brand_json = json.loads(cf.get('autohome', 'brand_json'))
+
+# 魔兽世界拍卖行
+wow_url = dict(zip(cf.options('wow'), [cf.get('wow', realm) for realm in cf.options('wow')]))
