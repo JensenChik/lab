@@ -7,7 +7,7 @@
         "last-value": "date.today()",
         "columns": [
             "id",
-            "key_word",
+            "realm",
             "json"
         ]
     },
