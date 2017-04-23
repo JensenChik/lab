@@ -5,6 +5,7 @@ import json
 import time
 from datetime import date
 import os
+import shutil
 import multiprocessing
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
@@ -31,7 +32,9 @@ def get(param):
 if __name__ == '__main__':
     print 'start to clean env'
     path = '/tmp/{}'.format(date.today())
-    if os.path.exists(path): os.removedirs(path)
+    if os.path.exists(path):
+        shutil.rmtree(path)
+        os.removedirs(path)
     os.mkdir(path)
 
     print 'start to get wow auction house data'
@@ -66,5 +69,6 @@ if __name__ == '__main__':
     print 'dump auction house to mysql finish'
 
     print 'finally, clean env'
-    os.removedirs('/tmp/{}'.format(date.today()))
+    shutil.rmtree(path)
+    os.removedirs(path)
     print 'all done'
