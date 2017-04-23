@@ -29,9 +29,12 @@ def get(param):
 
 
 if __name__ == '__main__':
-    print 'start to get wow auction house data'
-    os.mkdir('/tmp/{}'.format(date.today()))
+    print 'start to clean env'
+    path = '/tmp/{}'.format(date.today())
+    if os.path.exists(path): os.removedirs(path)
+    os.mkdir(path)
 
+    print 'start to get wow auction house data'
     pool = multiprocessing.Pool(processes=20)
     count = reduce(
         lambda x, y: x + y,
@@ -43,6 +46,12 @@ if __name__ == '__main__':
     pool.close()
     pool.join()
     print 'get wow auction house data finish, ware count: {}'.format(count)
+
+    print 'start to clean mysql dirty data'
+    session = DBSession()
+    session.delete(AuctionWare).filter_by(create_date=date.today())
+    session.commit()
+    session.close()
 
     print 'start to dump auction house data to mysql'
     for realm in wow_url.keys():
@@ -56,5 +65,6 @@ if __name__ == '__main__':
         session.close()
     print 'dump auction house to mysql finish'
 
+    print 'finally, clean env'
     os.removedirs('/tmp/{}'.format(date.today()))
     print 'all done'
