@@ -51,7 +51,7 @@ if __name__ == '__main__':
 
     print 'start to clean mysql dirty data'
     session = DBSession()
-    session.delete(AuctionWare).filter_by(create_date=date.today())
+    session.query(AuctionWare).filter_by(create_date=date.today()).delete()
     session.commit()
     session.close()
 
