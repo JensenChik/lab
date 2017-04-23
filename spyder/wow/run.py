@@ -22,7 +22,9 @@ def get(param):
     auctions = json.loads(req.content).get('auctions') or []
     print 'get {} data in {} by {} done'.format(realm, url, proxy.get('http'))
     time.sleep(4)
-    open('/tmp/{}/{}'.format(date.today(), realm), 'w').writelines(auctions).close()
+    fp = open('/tmp/{}/{}'.format(date.today(), realm), 'w')
+    map(lambda ware: fp.writelines('{}\n'.format(json.dumps(ware, ensure_ascii=False))), auctions)
+    fp.close()
     return len(auctions)
 
 
