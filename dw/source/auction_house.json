@@ -1,7 +1,7 @@
 {
     "mysql": {
         "db": "spyder",
-        "table": "auction_house",
+        "table": "auction_ware",
         "incremental": "lastmodified",
         "check-column": "create_date",
         "last-value": "date.today()",
@@ -13,7 +13,7 @@
     },
     "hive": {
         "db": "dw_source",
-        "table": "auction_house",
+        "table": "auction_ware",
         "partition": {
             "create_date": "date.today()"
         },
