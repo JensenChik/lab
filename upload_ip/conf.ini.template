@@ -1,0 +1,7 @@
+[program:upload_ip]
+directory=/path/to/lab/upload_ip
+command=env PATH="/path/to/python/bin" python get_ip.py
+user=root
+autostart=true
+autorestart=true
+die-on-term=true
