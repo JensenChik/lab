@@ -20,7 +20,7 @@ def get(param):
     req = requests.get(url, proxies=proxy, headers=HEADER, timeout=5)
     if req.status_code != 200: raise Exception('error return code')
     auctions = json.loads(req.content).get('auctions') or []
-    print 'get {} data in {} by {} done'.format(realm, url, proxy.get('http'))
+    print 'get {} data by {} done'.format(realm, proxy.get('http'))
     time.sleep(4)
     fp = open('/tmp/{}/{}'.format(date.today(), realm), 'w')
     map(lambda ware: fp.writelines('{}\n'.format(json.dumps(ware, ensure_ascii=False))), auctions)
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     print 'start to get wow auction house data'
     os.mkdir('/tmp/{}'.format(date.today()))
 
-    pool = multiprocessing.Pool(processes=10)
+    pool = multiprocessing.Pool(processes=20)
     count = reduce(
         lambda x, y: x + y,
         pool.map(
@@ -45,14 +45,16 @@ if __name__ == '__main__':
     print 'get wow auction house data finish, ware count: {}'.format(count)
 
     print 'start to dump auction house data to mysql'
-    session = DBSession()
-    for realm, _ in wow_url.items():
+    for realm in wow_url.keys():
+        session = DBSession()
         fp = open('/tmp/{}/{}'.format(date.today(), realm))
         data = [AuctionWare(realm=realm, json=line, create_date=date.today()) for line in fp]
         session.add_all(data)
         fp.close()
-    session.commit()
-    session.close()
+        print 'dump {} to mysql finish'.format(realm)
+        session.commit()
+        session.close()
     print 'dump auction house to mysql finish'
 
+    os.removedirs('/tmp/{}'.format(date.today()))
     print 'all done'
