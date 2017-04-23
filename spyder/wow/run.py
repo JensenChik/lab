@@ -34,7 +34,6 @@ if __name__ == '__main__':
     path = '/tmp/{}'.format(date.today())
     if os.path.exists(path):
         shutil.rmtree(path)
-        os.removedirs(path)
     os.mkdir(path)
 
     print 'start to get wow auction house data'
@@ -70,5 +69,4 @@ if __name__ == '__main__':
 
     print 'finally, clean env'
     shutil.rmtree(path)
-    os.removedirs(path)
     print 'all done'
