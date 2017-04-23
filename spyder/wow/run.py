@@ -23,7 +23,7 @@ def get(param):
     auctions = json.loads(req.content).get('auctions') or []
     print 'get {} data by {} done'.format(realm, proxy.get('http'))
     time.sleep(4)
-    fp = open('/tmp/{}/{}'.format(date.today(), realm), 'w')
+    fp = open('/tmp/{}_wow_auction_house/{}'.format(date.today(), realm), 'w')
     map(lambda ware: fp.writelines('{}\n'.format(json.dumps(ware, ensure_ascii=False))), auctions)
     fp.close()
     return len(auctions)
@@ -31,7 +31,7 @@ def get(param):
 
 if __name__ == '__main__':
     print 'start to clean env'
-    path = '/tmp/{}'.format(date.today())
+    path = '/tmp/{}_wow_auction_house'.format(date.today())
     if os.path.exists(path):
         shutil.rmtree(path)
     os.mkdir(path)
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     print 'start to dump auction house data to mysql'
     for realm in wow_url.keys():
         session = DBSession()
-        fp = open('/tmp/{}/{}'.format(date.today(), realm))
+        fp = open('/tmp/{}_wow_auction_house/{}'.format(date.today(), realm))
         data = [AuctionWare(realm=realm, json=line, create_date=date.today()) for line in fp]
         session.add_all(data)
         fp.close()
