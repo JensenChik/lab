@@ -26,6 +26,17 @@ class AuctionWare(BaseModel):
         return self.id
 
 
+class DoubanBook(BaseModel):
+    __tablename__ = 'douban_book'
+    id = Column(Integer, primary_key=True)
+    tag = Column(String(10), index=True)
+    html = Column(Text)
+    create_date = Column(Date, index=True)
+
+    def __repr__(self):
+        return self.id
+
+
 class LagouCompany(BaseModel):
     __tablename__ = 'lagou_company'
     id = Column(Integer, primary_key=True)
