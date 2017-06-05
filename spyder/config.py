@@ -75,3 +75,6 @@ autohome_brand_json = json.loads(cf.get('autohome', 'brand_json'))
 
 # 魔兽世界拍卖行
 wow_url = dict(zip(cf.options('wow'), [cf.get('wow', realm) for realm in cf.options('wow')]))
+
+# 豆瓣
+book_tag_list = cf.get('douban', 'book_tags').split(',')
