@@ -22,7 +22,7 @@ def get(tag):
     proxy = get_proxy()
     HEADER.update({"Cookie": "bid=%s" % "".join(random.sample(string.ascii_letters + string.digits, 11))})
     book_list = []
-    for pos in range(0, 1000, 50):
+    for pos in range(0, 1000, 20):
         url = "https://book.douban.com/tag/{}?start={}&type=T".format(tag, pos)
         req = requests.get(url, proxies=proxy, headers=HEADER, timeout=5)
         if req.status_code != 200: raise Exception('error return code')
