@@ -38,7 +38,7 @@ class Producer:
             SixSix(), QuanMin(), CooBoBo(), Data5U(),
             XiCi(style='nt'), XiCi(style='nn'), XiCi(style='wt'),
             YunDaiLi(style=1), YunDaiLi(style=2), YunDaiLi(style=3), YunDaiLi(style=4),
-            YunHai(style=1), YunHai(style=2), YunHai(style=3), YunHai(style=4),
+            #YunHai(style=1), YunHai(style=2), YunHai(style=3), YunHai(style=4),
         ]
         self._heart_beat = 600
 
