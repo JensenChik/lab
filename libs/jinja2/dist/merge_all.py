@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-
-
-
 """
     jinja2._compat
     ~~~~~~~~~~~~~~
@@ -100,6 +97,41 @@ try:
     from urllib.parse import quote_from_bytes as url_quote
 except ImportError:
     from urllib import quote as url_quote
+
+
+"""
+    jinja2.constants
+    ~~~~~~~~~~~~~~~
+
+    Various constants.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+
+
+#: list of lorem ipsum words used by the lipsum() helper function
+LOREM_IPSUM_WORDS = u'''\
+a ac accumsan ad adipiscing aenean aliquam aliquet amet ante aptent arcu at
+auctor augue bibendum blandit class commodo condimentum congue consectetuer
+consequat conubia convallis cras cubilia cum curabitur curae cursus dapibus
+diam dictum dictumst dignissim dis dolor donec dui duis egestas eget eleifend
+elementum elit enim erat eros est et etiam eu euismod facilisi facilisis fames
+faucibus felis fermentum feugiat fringilla fusce gravida habitant habitasse hac
+hendrerit hymenaeos iaculis id imperdiet in inceptos integer interdum ipsum
+justo lacinia lacus laoreet lectus leo libero ligula litora lobortis lorem
+luctus maecenas magna magnis malesuada massa mattis mauris metus mi molestie
+mollis montes morbi mus nam nascetur natoque nec neque netus nibh nisi nisl non
+nonummy nostra nulla nullam nunc odio orci ornare parturient pede pellentesque
+penatibus per pharetra phasellus placerat platea porta porttitor posuere
+potenti praesent pretium primis proin pulvinar purus quam quis quisque rhoncus
+ridiculus risus rutrum sagittis sapien scelerisque sed sem semper senectus sit
+sociis sociosqu sodales sollicitudin suscipit suspendisse taciti tellus tempor
+tempus tincidunt torquent tortor tristique turpis ullamcorper ultrices
+ultricies urna ut varius vehicula vel velit venenatis vestibulum vitae vivamus
+viverra volutpat vulputate'''
+
+
 
 """
     jinja2.utils
@@ -339,7 +371,7 @@ def urlize(text, trim_url_limit=None, rel=None, target=None):
 
 def generate_lorem_ipsum(n=5, html=True, min=20, max=100):
     """Generate some lorem ipsum for the template."""
-    from jinja2.constants import LOREM_IPSUM_WORDS
+    # from jinja2.constants import LOREM_IPSUM_WORDS
     from random import choice, randrange
     words = LOREM_IPSUM_WORDS.split()
     result = []
@@ -727,6 +759,1269 @@ from markupsafe import Markup, escape, soft_unicode
 
 
 
+"""
+    jinja2.filters
+    ~~~~~~~~~~~~~~
+
+    Bundled jinja filters.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+import re
+import math
+
+from random import choice
+from itertools import groupby
+from collections import namedtuple
+# from jinja2.utils import Markup, escape, pformat, urlize, soft_unicode, \
+#     unicode_urlencode, htmlsafe_json_dumps
+# from jinja2.runtime import Undefined
+# from jinja2.exceptions import FilterArgumentError
+# from jinja2._compat import imap, string_types, text_type, iteritems, PY2
+
+
+_word_re = re.compile(r'\w+', re.UNICODE)
+_word_beginning_split_re = re.compile(r'([-\s\(\{\[\<]+)', re.UNICODE)
+
+
+def contextfilter(f):
+    """Decorator for marking context dependent filters. The current
+    :class:`Context` will be passed as first argument.
+    """
+    f.contextfilter = True
+    return f
+
+
+def evalcontextfilter(f):
+    """Decorator for marking eval-context dependent filters.  An eval
+    context object is passed as first argument.  For more information
+    about the eval context, see :ref:`eval-context`.
+
+    .. versionadded:: 2.4
+    """
+    f.evalcontextfilter = True
+    return f
+
+
+def environmentfilter(f):
+    """Decorator for marking environment dependent filters.  The current
+    :class:`Environment` is passed to the filter as first argument.
+    """
+    f.environmentfilter = True
+    return f
+
+
+def make_attrgetter(environment, attribute):
+    """Returns a callable that looks up the given attribute from a
+    passed object with the rules of the environment.  Dots are allowed
+    to access attributes of attributes.  Integer parts in paths are
+    looked up as integers.
+    """
+    if not isinstance(attribute, string_types) \
+            or ('.' not in attribute and not attribute.isdigit()):
+        return lambda x: environment.getitem(x, attribute)
+    attribute = attribute.split('.')
+    def attrgetter(item):
+        for part in attribute:
+            if part.isdigit():
+                part = int(part)
+            item = environment.getitem(item, part)
+        return item
+    return attrgetter
+
+
+def do_forceescape(value):
+    """Enforce HTML escaping.  This will probably double escape variables."""
+    if hasattr(value, '__html__'):
+        value = value.__html__()
+    return escape(text_type(value))
+
+
+def do_urlencode(value):
+    """Escape strings for use in URLs (uses UTF-8 encoding).  It accepts both
+    dictionaries and regular strings as well as pairwise iterables.
+
+    .. versionadded:: 2.7
+    """
+    itemiter = None
+    if isinstance(value, dict):
+        itemiter = iteritems(value)
+    elif not isinstance(value, string_types):
+        try:
+            itemiter = iter(value)
+        except TypeError:
+            pass
+    if itemiter is None:
+        return unicode_urlencode(value)
+    return u'&'.join(unicode_urlencode(k) + '=' +
+                     unicode_urlencode(v, for_qs=True)
+                     for k, v in itemiter)
+
+
+@evalcontextfilter
+def do_replace(eval_ctx, s, old, new, count=None):
+    """Return a copy of the value with all occurrences of a substring
+    replaced with a new one. The first argument is the substring
+    that should be replaced, the second is the replacement string.
+    If the optional third argument ``count`` is given, only the first
+    ``count`` occurrences are replaced:
+
+    .. sourcecode:: jinja
+
+        {{ "Hello World"|replace("Hello", "Goodbye") }}
+            -> Goodbye World
+
+        {{ "aaaaargh"|replace("a", "d'oh, ", 2) }}
+            -> d'oh, d'oh, aaargh
+    """
+    if count is None:
+        count = -1
+    if not eval_ctx.autoescape:
+        return text_type(s).replace(text_type(old), text_type(new), count)
+    if hasattr(old, '__html__') or hasattr(new, '__html__') and \
+            not hasattr(s, '__html__'):
+        s = escape(s)
+    else:
+        s = soft_unicode(s)
+    return s.replace(soft_unicode(old), soft_unicode(new), count)
+
+
+def do_upper(s):
+    """Convert a value to uppercase."""
+    return soft_unicode(s).upper()
+
+
+def do_lower(s):
+    """Convert a value to lowercase."""
+    return soft_unicode(s).lower()
+
+
+@evalcontextfilter
+def do_xmlattr(_eval_ctx, d, autospace=True):
+    """Create an SGML/XML attribute string based on the items in a dict.
+    All values that are neither `none` nor `undefined` are automatically
+    escaped:
+
+    .. sourcecode:: html+jinja
+
+        <ul{{ {'class': 'my_list', 'missing': none,
+                'id': 'list-%d'|format(variable)}|xmlattr }}>
+        ...
+        </ul>
+
+    Results in something like this:
+
+    .. sourcecode:: html
+
+        <ul class="my_list" id="list-42">
+        ...
+        </ul>
+
+    As you can see it automatically prepends a space in front of the item
+    if the filter returned something unless the second parameter is false.
+    """
+    rv = u' '.join(
+        u'%s="%s"' % (escape(key), escape(value))
+        for key, value in iteritems(d)
+        if value is not None and not isinstance(value, Undefined)
+    )
+    if autospace and rv:
+        rv = u' ' + rv
+    if _eval_ctx.autoescape:
+        rv = Markup(rv)
+    return rv
+
+
+def do_capitalize(s):
+    """Capitalize a value. The first character will be uppercase, all others
+    lowercase.
+    """
+    return soft_unicode(s).capitalize()
+
+
+def do_title(s):
+    """Return a titlecased version of the value. I.e. words will start with
+    uppercase letters, all remaining characters are lowercase.
+    """
+    return ''.join(
+        [item[0].upper() + item[1:].lower()
+         for item in _word_beginning_split_re.split(soft_unicode(s))
+         if item])
+
+
+def do_dictsort(value, case_sensitive=False, by='key'):
+    """Sort a dict and yield (key, value) pairs. Because python dicts are
+    unsorted you may want to use this function to order them by either
+    key or value:
+
+    .. sourcecode:: jinja
+
+        {% for item in mydict|dictsort %}
+            sort the dict by key, case insensitive
+
+        {% for item in mydict|dictsort(true) %}
+            sort the dict by key, case sensitive
+
+        {% for item in mydict|dictsort(false, 'value') %}
+            sort the dict by value, case insensitive
+    """
+    if by == 'key':
+        pos = 0
+    elif by == 'value':
+        pos = 1
+    else:
+        raise FilterArgumentError('You can only sort by either '
+                                  '"key" or "value"')
+    def sort_func(item):
+        value = item[pos]
+        if isinstance(value, string_types) and not case_sensitive:
+            value = value.lower()
+        return value
+
+    return sorted(value.items(), key=sort_func)
+
+
+@environmentfilter
+def do_sort(environment, value, reverse=False, case_sensitive=False,
+            attribute=None):
+    """Sort an iterable.  Per default it sorts ascending, if you pass it
+    true as first argument it will reverse the sorting.
+
+    If the iterable is made of strings the third parameter can be used to
+    control the case sensitiveness of the comparison which is disabled by
+    default.
+
+    .. sourcecode:: jinja
+
+        {% for item in iterable|sort %}
+            ...
+        {% endfor %}
+
+    It is also possible to sort by an attribute (for example to sort
+    by the date of an object) by specifying the `attribute` parameter:
+
+    .. sourcecode:: jinja
+
+        {% for item in iterable|sort(attribute='date') %}
+            ...
+        {% endfor %}
+
+    .. versionchanged:: 2.6
+       The `attribute` parameter was added.
+    """
+    if not case_sensitive:
+        def sort_func(item):
+            if isinstance(item, string_types):
+                item = item.lower()
+            return item
+    else:
+        sort_func = None
+    if attribute is not None:
+        getter = make_attrgetter(environment, attribute)
+        def sort_func(item, processor=sort_func or (lambda x: x)):
+            return processor(getter(item))
+    return sorted(value, key=sort_func, reverse=reverse)
+
+
+def do_default(value, default_value=u'', boolean=False):
+    """If the value is undefined it will return the passed default value,
+    otherwise the value of the variable:
+
+    .. sourcecode:: jinja
+
+        {{ my_variable|default('my_variable is not defined') }}
+
+    This will output the value of ``my_variable`` if the variable was
+    defined, otherwise ``'my_variable is not defined'``. If you want
+    to use default with variables that evaluate to false you have to
+    set the second parameter to `true`:
+
+    .. sourcecode:: jinja
+
+        {{ ''|default('the string was empty', true) }}
+    """
+    if isinstance(value, Undefined) or (boolean and not value):
+        return default_value
+    return value
+
+
+@evalcontextfilter
+def do_join(eval_ctx, value, d=u'', attribute=None):
+    """Return a string which is the concatenation of the strings in the
+    sequence. The separator between elements is an empty string per
+    default, you can define it with the optional parameter:
+
+    .. sourcecode:: jinja
+
+        {{ [1, 2, 3]|join('|') }}
+            -> 1|2|3
+
+        {{ [1, 2, 3]|join }}
+            -> 123
+
+    It is also possible to join certain attributes of an object:
+
+    .. sourcecode:: jinja
+
+        {{ users|join(', ', attribute='username') }}
+
+    .. versionadded:: 2.6
+       The `attribute` parameter was added.
+    """
+    if attribute is not None:
+        value = imap(make_attrgetter(eval_ctx.environment, attribute), value)
+
+    # no automatic escaping?  joining is a lot eaiser then
+    if not eval_ctx.autoescape:
+        return text_type(d).join(imap(text_type, value))
+
+    # if the delimiter doesn't have an html representation we check
+    # if any of the items has.  If yes we do a coercion to Markup
+    if not hasattr(d, '__html__'):
+        value = list(value)
+        do_escape = False
+        for idx, item in enumerate(value):
+            if hasattr(item, '__html__'):
+                do_escape = True
+            else:
+                value[idx] = text_type(item)
+        if do_escape:
+            d = escape(d)
+        else:
+            d = text_type(d)
+        return d.join(value)
+
+    # no html involved, to normal joining
+    return soft_unicode(d).join(imap(soft_unicode, value))
+
+
+def do_center(value, width=80):
+    """Centers the value in a field of a given width."""
+    return text_type(value).center(width)
+
+
+@environmentfilter
+def do_first(environment, seq):
+    """Return the first item of a sequence."""
+    try:
+        return next(iter(seq))
+    except StopIteration:
+        return environment.undefined('No first item, sequence was empty.')
+
+
+@environmentfilter
+def do_last(environment, seq):
+    """Return the last item of a sequence."""
+    try:
+        return next(iter(reversed(seq)))
+    except StopIteration:
+        return environment.undefined('No last item, sequence was empty.')
+
+
+@environmentfilter
+def do_random(environment, seq):
+    """Return a random item from the sequence."""
+    try:
+        return choice(seq)
+    except IndexError:
+        return environment.undefined('No random item, sequence was empty.')
+
+
+def do_filesizeformat(value, binary=False):
+    """Format the value like a 'human-readable' file size (i.e. 13 kB,
+    4.1 MB, 102 Bytes, etc).  Per default decimal prefixes are used (Mega,
+    Giga, etc.), if the second parameter is set to `True` the binary
+    prefixes are used (Mebi, Gibi).
+    """
+    bytes = float(value)
+    base = binary and 1024 or 1000
+    prefixes = [
+        (binary and 'KiB' or 'kB'),
+        (binary and 'MiB' or 'MB'),
+        (binary and 'GiB' or 'GB'),
+        (binary and 'TiB' or 'TB'),
+        (binary and 'PiB' or 'PB'),
+        (binary and 'EiB' or 'EB'),
+        (binary and 'ZiB' or 'ZB'),
+        (binary and 'YiB' or 'YB')
+    ]
+    if bytes == 1:
+        return '1 Byte'
+    elif bytes < base:
+        return '%d Bytes' % bytes
+    else:
+        for i, prefix in enumerate(prefixes):
+            unit = base ** (i + 2)
+            if bytes < unit:
+                return '%.1f %s' % ((base * bytes / unit), prefix)
+        return '%.1f %s' % ((base * bytes / unit), prefix)
+
+
+def do_pprint(value, verbose=False):
+    """Pretty print a variable. Useful for debugging.
+
+    With Jinja 1.2 onwards you can pass it a parameter.  If this parameter
+    is truthy the output will be more verbose (this requires `pretty`)
+    """
+    return pformat(value, verbose=verbose)
+
+
+@evalcontextfilter
+def do_urlize(eval_ctx, value, trim_url_limit=None, nofollow=False,
+              target=None, rel=None):
+    """Converts URLs in plain text into clickable links.
+
+    If you pass the filter an additional integer it will shorten the urls
+    to that number. Also a third argument exists that makes the urls
+    "nofollow":
+
+    .. sourcecode:: jinja
+
+        {{ mytext|urlize(40, true) }}
+            links are shortened to 40 chars and defined with rel="nofollow"
+
+    If *target* is specified, the ``target`` attribute will be added to the
+    ``<a>`` tag:
+
+    .. sourcecode:: jinja
+
+       {{ mytext|urlize(40, target='_blank') }}
+
+    .. versionchanged:: 2.8+
+       The *target* parameter was added.
+    """
+    policies = eval_ctx.environment.policies
+    rel = set((rel or '').split() or [])
+    if nofollow:
+        rel.add('nofollow')
+    rel.update((policies['urlize.rel'] or '').split())
+    if target is None:
+        target = policies['urlize.target']
+    rel = ' '.join(sorted(rel)) or None
+    rv = urlize(value, trim_url_limit, rel=rel, target=target)
+    if eval_ctx.autoescape:
+        rv = Markup(rv)
+    return rv
+
+
+def do_indent(s, width=4, indentfirst=False):
+    """Return a copy of the passed string, each line indented by
+    4 spaces. The first line is not indented. If you want to
+    change the number of spaces or indent the first line too
+    you can pass additional parameters to the filter:
+
+    .. sourcecode:: jinja
+
+        {{ mytext|indent(2, true) }}
+            indent by two spaces and indent the first line too.
+    """
+    indention = u' ' * width
+    rv = (u'\n' + indention).join(s.splitlines())
+    if indentfirst:
+        rv = indention + rv
+    return rv
+
+
+@environmentfilter
+def do_truncate(env, s, length=255, killwords=False, end='...', leeway=None):
+    """Return a truncated copy of the string. The length is specified
+    with the first parameter which defaults to ``255``. If the second
+    parameter is ``true`` the filter will cut the text at length. Otherwise
+    it will discard the last word. If the text was in fact
+    truncated it will append an ellipsis sign (``"..."``). If you want a
+    different ellipsis sign than ``"..."`` you can specify it using the
+    third parameter. Strings that only exceed the length by the tolerance
+    margin given in the fourth parameter will not be truncated.
+
+    .. sourcecode:: jinja
+
+        {{ "foo bar baz qux"|truncate(9) }}
+            -> "foo..."
+        {{ "foo bar baz qux"|truncate(9, True) }}
+            -> "foo ba..."
+        {{ "foo bar baz qux"|truncate(11) }}
+            -> "foo bar baz qux"
+        {{ "foo bar baz qux"|truncate(11, False, '...', 0) }}
+            -> "foo bar..."
+
+    The default leeway on newer Jinja2 versions is 5 and was 0 before but
+    can be reconfigured globally.
+    """
+    if leeway is None:
+        leeway = env.policies['truncate.leeway']
+    assert length >= len(end), 'expected length >= %s, got %s' % (len(end), length)
+    assert leeway >= 0, 'expected leeway >= 0, got %s' % leeway
+    if len(s) <= length + leeway:
+        return s
+    if killwords:
+        return s[:length - len(end)] + end
+    result = s[:length - len(end)].rsplit(' ', 1)[0]
+    return result + end
+
+
+@environmentfilter
+def do_wordwrap(environment, s, width=79, break_long_words=True,
+                wrapstring=None):
+    """
+    Return a copy of the string passed to the filter wrapped after
+    ``79`` characters.  You can override this default using the first
+    parameter.  If you set the second parameter to `false` Jinja will not
+    split words apart if they are longer than `width`. By default, the newlines
+    will be the default newlines for the environment, but this can be changed
+    using the wrapstring keyword argument.
+
+    .. versionadded:: 2.7
+       Added support for the `wrapstring` parameter.
+    """
+    if not wrapstring:
+        wrapstring = environment.newline_sequence
+    import textwrap
+    return wrapstring.join(textwrap.wrap(s, width=width, expand_tabs=False,
+                                         replace_whitespace=False,
+                                         break_long_words=break_long_words))
+
+
+def do_wordcount(s):
+    """Count the words in that string."""
+    return len(_word_re.findall(s))
+
+
+def do_int(value, default=0, base=10):
+    """Convert the value into an integer. If the
+    conversion doesn't work it will return ``0``. You can
+    override this default using the first parameter. You
+    can also override the default base (10) in the second
+    parameter, which handles input with prefixes such as
+    0b, 0o and 0x for bases 2, 8 and 16 respectively.
+    The base is ignored for decimal numbers and non-string values.
+    """
+    try:
+        if isinstance(value, string_types):
+            return int(value, base)
+        return int(value)
+    except (TypeError, ValueError):
+        # this quirk is necessary so that "42.23"|int gives 42.
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+
+def do_float(value, default=0.0):
+    """Convert the value into a floating point number. If the
+    conversion doesn't work it will return ``0.0``. You can
+    override this default using the first parameter.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def do_format(value, *args, **kwargs):
+    """
+    Apply python string formatting on an object:
+
+    .. sourcecode:: jinja
+
+        {{ "%s - %s"|format("Hello?", "Foo!") }}
+            -> Hello? - Foo!
+    """
+    if args and kwargs:
+        raise FilterArgumentError('can\'t handle positional and keyword '
+                                  'arguments at the same time')
+    return soft_unicode(value) % (kwargs or args)
+
+
+def do_trim(value):
+    """Strip leading and trailing whitespace."""
+    return soft_unicode(value).strip()
+
+
+def do_striptags(value):
+    """Strip SGML/XML tags and replace adjacent whitespace by one space.
+    """
+    if hasattr(value, '__html__'):
+        value = value.__html__()
+    return Markup(text_type(value)).striptags()
+
+
+def do_slice(value, slices, fill_with=None):
+    """Slice an iterator and return a list of lists containing
+    those items. Useful if you want to create a div containing
+    three ul tags that represent columns:
+
+    .. sourcecode:: html+jinja
+
+        <div class="columwrapper">
+          {%- for column in items|slice(3) %}
+            <ul class="column-{{ loop.index }}">
+            {%- for item in column %}
+              <li>{{ item }}</li>
+            {%- endfor %}
+            </ul>
+          {%- endfor %}
+        </div>
+
+    If you pass it a second argument it's used to fill missing
+    values on the last iteration.
+    """
+    seq = list(value)
+    length = len(seq)
+    items_per_slice = length // slices
+    slices_with_extra = length % slices
+    offset = 0
+    for slice_number in range(slices):
+        start = offset + slice_number * items_per_slice
+        if slice_number < slices_with_extra:
+            offset += 1
+        end = offset + (slice_number + 1) * items_per_slice
+        tmp = seq[start:end]
+        if fill_with is not None and slice_number >= slices_with_extra:
+            tmp.append(fill_with)
+        yield tmp
+
+
+def do_batch(value, linecount, fill_with=None):
+    """
+    A filter that batches items. It works pretty much like `slice`
+    just the other way round. It returns a list of lists with the
+    given number of items. If you provide a second parameter this
+    is used to fill up missing items. See this example:
+
+    .. sourcecode:: html+jinja
+
+        <table>
+        {%- for row in items|batch(3, '&nbsp;') %}
+          <tr>
+          {%- for column in row %}
+            <td>{{ column }}</td>
+          {%- endfor %}
+          </tr>
+        {%- endfor %}
+        </table>
+    """
+    tmp = []
+    for item in value:
+        if len(tmp) == linecount:
+            yield tmp
+            tmp = []
+        tmp.append(item)
+    if tmp:
+        if fill_with is not None and len(tmp) < linecount:
+            tmp += [fill_with] * (linecount - len(tmp))
+        yield tmp
+
+
+def do_round(value, precision=0, method='common'):
+    """Round the number to a given precision. The first
+    parameter specifies the precision (default is ``0``), the
+    second the rounding method:
+
+    - ``'common'`` rounds either up or down
+    - ``'ceil'`` always rounds up
+    - ``'floor'`` always rounds down
+
+    If you don't specify a method ``'common'`` is used.
+
+    .. sourcecode:: jinja
+
+        {{ 42.55|round }}
+            -> 43.0
+        {{ 42.55|round(1, 'floor') }}
+            -> 42.5
+
+    Note that even if rounded to 0 precision, a float is returned.  If
+    you need a real integer, pipe it through `int`:
+
+    .. sourcecode:: jinja
+
+        {{ 42.55|round|int }}
+            -> 43
+    """
+    if not method in ('common', 'ceil', 'floor'):
+        raise FilterArgumentError('method must be common, ceil or floor')
+    if method == 'common':
+        return round(value, precision)
+    func = getattr(math, method)
+    return func(value * (10 ** precision)) / (10 ** precision)
+
+
+# Use a regular tuple repr here.  This is what we did in the past and we
+# really want to hide this custom type as much as possible.  In particular
+# we do not want to accidentally expose an auto generated repr in case
+# people start to print this out in comments or something similar for
+# debugging.
+_GroupTuple = namedtuple('_GroupTuple', ['grouper', 'list'])
+_GroupTuple.__repr__ = tuple.__repr__
+_GroupTuple.__str__ = tuple.__str__
+
+@environmentfilter
+def do_groupby(environment, value, attribute):
+    """Group a sequence of objects by a common attribute.
+
+    If you for example have a list of dicts or objects that represent persons
+    with `gender`, `first_name` and `last_name` attributes and you want to
+    group all users by genders you can do something like the following
+    snippet:
+
+    .. sourcecode:: html+jinja
+
+        <ul>
+        {% for group in persons|groupby('gender') %}
+            <li>{{ group.grouper }}<ul>
+            {% for person in group.list %}
+                <li>{{ person.first_name }} {{ person.last_name }}</li>
+            {% endfor %}</ul></li>
+        {% endfor %}
+        </ul>
+
+    Additionally it's possible to use tuple unpacking for the grouper and
+    list:
+
+    .. sourcecode:: html+jinja
+
+        <ul>
+        {% for grouper, list in persons|groupby('gender') %}
+            ...
+        {% endfor %}
+        </ul>
+
+    As you can see the item we're grouping by is stored in the `grouper`
+    attribute and the `list` contains all the objects that have this grouper
+    in common.
+
+    .. versionchanged:: 2.6
+       It's now possible to use dotted notation to group by the child
+       attribute of another attribute.
+    """
+    expr = make_attrgetter(environment, attribute)
+    return [_GroupTuple(key, list(values)) for key, values
+            in groupby(sorted(value, key=expr), expr)]
+
+
+@environmentfilter
+def do_sum(environment, iterable, attribute=None, start=0):
+    """Returns the sum of a sequence of numbers plus the value of parameter
+    'start' (which defaults to 0).  When the sequence is empty it returns
+    start.
+
+    It is also possible to sum up only certain attributes:
+
+    .. sourcecode:: jinja
+
+        Total: {{ items|sum(attribute='price') }}
+
+    .. versionchanged:: 2.6
+       The `attribute` parameter was added to allow suming up over
+       attributes.  Also the `start` parameter was moved on to the right.
+    """
+    if attribute is not None:
+        iterable = imap(make_attrgetter(environment, attribute), iterable)
+    return sum(iterable, start)
+
+
+def do_list(value):
+    """Convert the value into a list.  If it was a string the returned list
+    will be a list of characters.
+    """
+    return list(value)
+
+
+def do_mark_safe(value):
+    """Mark the value as safe which means that in an environment with automatic
+    escaping enabled this variable will not be escaped.
+    """
+    return Markup(value)
+
+
+def do_mark_unsafe(value):
+    """Mark a value as unsafe.  This is the reverse operation for :func:`safe`."""
+    return text_type(value)
+
+
+def do_reverse(value):
+    """Reverse the object or return an iterator that iterates over it the other
+    way round.
+    """
+    if isinstance(value, string_types):
+        return value[::-1]
+    try:
+        return reversed(value)
+    except TypeError:
+        try:
+            rv = list(value)
+            rv.reverse()
+            return rv
+        except TypeError:
+            raise FilterArgumentError('argument must be iterable')
+
+
+@environmentfilter
+def do_attr(environment, obj, name):
+    """Get an attribute of an object.  ``foo|attr("bar")`` works like
+    ``foo.bar`` just that always an attribute is returned and items are not
+    looked up.
+
+    See :ref:`Notes on subscriptions <notes-on-subscriptions>` for more details.
+    """
+    try:
+        name = str(name)
+    except UnicodeError:
+        pass
+    else:
+        try:
+            value = getattr(obj, name)
+        except AttributeError:
+            pass
+        else:
+            if environment.sandboxed and not \
+                    environment.is_safe_attribute(obj, name, value):
+                return environment.unsafe_undefined(obj, name)
+            return value
+    return environment.undefined(obj=obj, name=name)
+
+
+@contextfilter
+def do_map(*args, **kwargs):
+    """Applies a filter on a sequence of objects or looks up an attribute.
+    This is useful when dealing with lists of objects but you are really
+    only interested in a certain value of it.
+
+    The basic usage is mapping on an attribute.  Imagine you have a list
+    of users but you are only interested in a list of usernames:
+
+    .. sourcecode:: jinja
+
+        Users on this page: {{ users|map(attribute='username')|join(', ') }}
+
+    Alternatively you can let it invoke a filter by passing the name of the
+    filter and the arguments afterwards.  A good example would be applying a
+    text conversion filter on a sequence:
+
+    .. sourcecode:: jinja
+
+        Users on this page: {{ titles|map('lower')|join(', ') }}
+
+    .. versionadded:: 2.7
+    """
+    seq, func = prepare_map(args, kwargs)
+    if seq:
+        for item in seq:
+            yield func(item)
+
+
+@contextfilter
+def do_select(*args, **kwargs):
+    """Filters a sequence of objects by applying a test to each object,
+    and only selecting the objects with the test succeeding.
+
+    If no test is specified, each object will be evaluated as a boolean.
+
+    Example usage:
+
+    .. sourcecode:: jinja
+
+        {{ numbers|select("odd") }}
+        {{ numbers|select("odd") }}
+
+    .. versionadded:: 2.7
+    """
+    return select_or_reject(args, kwargs, lambda x: x, False)
+
+
+@contextfilter
+def do_reject(*args, **kwargs):
+    """Filters a sequence of objects by applying a test to each object,
+    and rejecting the objects with the test succeeding.
+
+    If no test is specified, each object will be evaluated as a boolean.
+
+    Example usage:
+
+    .. sourcecode:: jinja
+
+        {{ numbers|reject("odd") }}
+
+    .. versionadded:: 2.7
+    """
+    return select_or_reject(args, kwargs, lambda x: not x, False)
+
+
+@contextfilter
+def do_selectattr(*args, **kwargs):
+    """Filters a sequence of objects by applying a test to the specified
+    attribute of each object, and only selecting the objects with the
+    test succeeding.
+
+    If no test is specified, the attribute's value will be evaluated as
+    a boolean.
+
+    Example usage:
+
+    .. sourcecode:: jinja
+
+        {{ users|selectattr("is_active") }}
+        {{ users|selectattr("email", "none") }}
+
+    .. versionadded:: 2.7
+    """
+    return select_or_reject(args, kwargs, lambda x: x, True)
+
+
+@contextfilter
+def do_rejectattr(*args, **kwargs):
+    """Filters a sequence of objects by applying a test to the specified
+    attribute of each object, and rejecting the objects with the test
+    succeeding.
+
+    If no test is specified, the attribute's value will be evaluated as
+    a boolean.
+
+    .. sourcecode:: jinja
+
+        {{ users|rejectattr("is_active") }}
+        {{ users|rejectattr("email", "none") }}
+
+    .. versionadded:: 2.7
+    """
+    return select_or_reject(args, kwargs, lambda x: not x, True)
+
+
+@evalcontextfilter
+def do_tojson(eval_ctx, value, indent=None):
+    """Dumps a structure to JSON so that it's safe to use in ``<script>``
+    tags.  It accepts the same arguments and returns a JSON string.  Note that
+    this is available in templates through the ``|tojson`` filter which will
+    also mark the result as safe.  Due to how this function escapes certain
+    characters this is safe even if used outside of ``<script>`` tags.
+
+    The following characters are escaped in strings:
+
+    -   ``<``
+    -   ``>``
+    -   ``&``
+    -   ``'``
+
+    This makes it safe to embed such strings in any place in HTML with the
+    notable exception of double quoted attributes.  In that case single
+    quote your attributes or HTML escape it in addition.
+
+    The indent parameter can be used to enable pretty printing.  Set it to
+    the number of spaces that the structures should be indented with.
+
+    Note that this filter is for use in HTML contexts only.
+
+    .. versionadded:: 2.9
+    """
+    policies = eval_ctx.environment.policies
+    dumper = policies['json.dumps_function']
+    options = policies['json.dumps_kwargs']
+    if indent is not None:
+        options = dict(options)
+        options['indent'] = indent
+    return htmlsafe_json_dumps(value, dumper=dumper, **options)
+
+
+def prepare_map(args, kwargs):
+    context = args[0]
+    seq = args[1]
+
+    if len(args) == 2 and 'attribute' in kwargs:
+        attribute = kwargs.pop('attribute')
+        if kwargs:
+            raise FilterArgumentError('Unexpected keyword argument %r' %
+                                      next(iter(kwargs)))
+        func = make_attrgetter(context.environment, attribute)
+    else:
+        try:
+            name = args[2]
+            args = args[3:]
+        except LookupError:
+            raise FilterArgumentError('map requires a filter argument')
+        func = lambda item: context.environment.call_filter(
+            name, item, args, kwargs, context=context)
+
+    return seq, func
+
+
+def prepare_select_or_reject(args, kwargs, modfunc, lookup_attr):
+    context = args[0]
+    seq = args[1]
+    if lookup_attr:
+        try:
+            attr = args[2]
+        except LookupError:
+            raise FilterArgumentError('Missing parameter for attribute name')
+        transfunc = make_attrgetter(context.environment, attr)
+        off = 1
+    else:
+        off = 0
+        transfunc = lambda x: x
+
+    try:
+        name = args[2 + off]
+        args = args[3 + off:]
+        func = lambda item: context.environment.call_test(
+            name, item, args, kwargs)
+    except LookupError:
+        func = bool
+
+    return seq, lambda item: modfunc(func(transfunc(item)))
+
+
+def select_or_reject(args, kwargs, modfunc, lookup_attr):
+    seq, func = prepare_select_or_reject(args, kwargs, modfunc, lookup_attr)
+    if seq:
+        for item in seq:
+            if func(item):
+                yield item
+
+
+FILTERS = {
+    'abs':                  abs,
+    'attr':                 do_attr,
+    'batch':                do_batch,
+    'capitalize':           do_capitalize,
+    'center':               do_center,
+    'count':                len,
+    'd':                    do_default,
+    'default':              do_default,
+    'dictsort':             do_dictsort,
+    'e':                    escape,
+    'escape':               escape,
+    'filesizeformat':       do_filesizeformat,
+    'first':                do_first,
+    'float':                do_float,
+    'forceescape':          do_forceescape,
+    'format':               do_format,
+    'groupby':              do_groupby,
+    'indent':               do_indent,
+    'int':                  do_int,
+    'join':                 do_join,
+    'last':                 do_last,
+    'length':               len,
+    'list':                 do_list,
+    'lower':                do_lower,
+    'map':                  do_map,
+    'pprint':               do_pprint,
+    'random':               do_random,
+    'reject':               do_reject,
+    'rejectattr':           do_rejectattr,
+    'replace':              do_replace,
+    'reverse':              do_reverse,
+    'round':                do_round,
+    'safe':                 do_mark_safe,
+    'select':               do_select,
+    'selectattr':           do_selectattr,
+    'slice':                do_slice,
+    'sort':                 do_sort,
+    'string':               soft_unicode,
+    'striptags':            do_striptags,
+    'sum':                  do_sum,
+    'title':                do_title,
+    'trim':                 do_trim,
+    'truncate':             do_truncate,
+    'upper':                do_upper,
+    'urlencode':            do_urlencode,
+    'urlize':               do_urlize,
+    'wordcount':            do_wordcount,
+    'wordwrap':             do_wordwrap,
+    'xmlattr':              do_xmlattr,
+    'tojson':               do_tojson,
+}
+
+
+
+"""
+    jinja2.tests
+    ~~~~~~~~~~~~
+
+    Jinja test functions. Used with the "is" operator.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+import re
+from collections import Mapping
+# from jinja2.runtime import Undefined
+# from jinja2._compat import text_type, string_types, integer_types
+import decimal
+
+number_re = re.compile(r'^-?\d+(\.\d+)?$')
+regex_type = type(number_re)
+
+
+test_callable = callable
+
+
+def test_odd(value):
+    """Return true if the variable is odd."""
+    return value % 2 == 1
+
+
+def test_even(value):
+    """Return true if the variable is even."""
+    return value % 2 == 0
+
+
+def test_divisibleby(value, num):
+    """Check if a variable is divisible by a number."""
+    return value % num == 0
+
+
+def test_defined(value):
+    """Return true if the variable is defined:
+
+    .. sourcecode:: jinja
+
+        {% if variable is defined %}
+            value of variable: {{ variable }}
+        {% else %}
+            variable is not defined
+        {% endif %}
+
+    See the :func:`default` filter for a simple way to set undefined
+    variables.
+    """
+    return not isinstance(value, Undefined)
+
+
+def test_undefined(value):
+    """Like :func:`defined` but the other way round."""
+    return isinstance(value, Undefined)
+
+
+def test_none(value):
+    """Return true if the variable is none."""
+    return value is None
+
+
+def test_lower(value):
+    """Return true if the variable is lowercased."""
+    return text_type(value).islower()
+
+
+def test_upper(value):
+    """Return true if the variable is uppercased."""
+    return text_type(value).isupper()
+
+
+def test_string(value):
+    """Return true if the object is a string."""
+    return isinstance(value, string_types)
+
+
+def test_mapping(value):
+    """Return true if the object is a mapping (dict etc.).
+
+    .. versionadded:: 2.6
+    """
+    return isinstance(value, Mapping)
+
+
+def test_number(value):
+    """Return true if the variable is a number."""
+    return isinstance(value, integer_types + (float, complex, decimal.Decimal))
+
+
+def test_sequence(value):
+    """Return true if the variable is a sequence. Sequences are variables
+    that are iterable.
+    """
+    try:
+        len(value)
+        value.__getitem__
+    except:
+        return False
+    return True
+
+
+def test_equalto(value, other):
+    """Check if an object has the same value as another object:
+
+    .. sourcecode:: jinja
+
+        {% if foo.expression is equalto 42 %}
+            the foo attribute evaluates to the constant 42
+        {% endif %}
+
+    This appears to be a useless test as it does exactly the same as the
+    ``==`` operator, but it can be useful when used together with the
+    `selectattr` function:
+
+    .. sourcecode:: jinja
+
+        {{ users|selectattr("email", "equalto", "foo@bar.invalid") }}
+
+    .. versionadded:: 2.8
+    """
+    return value == other
+
+
+def test_sameas(value, other):
+    """Check if an object points to the same memory address than another
+    object:
+
+    .. sourcecode:: jinja
+
+        {% if foo.attribute is sameas false %}
+            the foo attribute really is the `False` singleton
+        {% endif %}
+    """
+    return value is other
+
+
+def test_iterable(value):
+    """Check if it's possible to iterate over an object."""
+    try:
+        iter(value)
+    except TypeError:
+        return False
+    return True
+
+
+def test_escaped(value):
+    """Check if the value is escaped."""
+    return hasattr(value, '__html__')
+
+
+def test_greaterthan(value, other):
+    """Check if value is greater than other."""
+    return value > other
+
+
+def test_lessthan(value, other):
+    """Check if value is less than other."""
+    return value < other
+
+
+TESTS = {
+    'odd':              test_odd,
+    'even':             test_even,
+    'divisibleby':      test_divisibleby,
+    'defined':          test_defined,
+    'undefined':        test_undefined,
+    'none':             test_none,
+    'lower':            test_lower,
+    'upper':            test_upper,
+    'string':           test_string,
+    'mapping':          test_mapping,
+    'number':           test_number,
+    'sequence':         test_sequence,
+    'iterable':         test_iterable,
+    'callable':         test_callable,
+    'sameas':           test_sameas,
+    'equalto':          test_equalto,
+    'escaped':          test_escaped,
+    'greaterthan':      test_greaterthan,
+    'lessthan':         test_lessthan
+}
+
+
+
+
 
 """
     jinja2.defaults
@@ -757,8 +2052,10 @@ KEEP_TRAILING_NEWLINE = False
 
 
 # default filters, tests and namespace
-from jinja2.filters import FILTERS as DEFAULT_FILTERS
-from jinja2.tests import TESTS as DEFAULT_TESTS
+# from jinja2.filters import FILTERS as DEFAULT_FILTERS
+DEFAULT_FILTERS = FILTERS
+# from jinja2.tests import TESTS as DEFAULT_TESTS
+DEFAULT_TESTS = TESTS
 DEFAULT_NAMESPACE = {
     'range':        range_type,
     'dict':         dict,
@@ -3962,6 +5259,3301 @@ NodeType.__new__ = staticmethod(_failing_new); del _failing_new
 
 
 
+
+
+"""
+    jinja2.lexer
+    ~~~~~~~~~~~~
+
+    This module implements a Jinja / Python combination lexer. The
+    `Lexer` class provided by this module is used to do some preprocessing
+    for Jinja.
+
+    On the one hand it filters out invalid operators like the bitshift
+    operators we don't allow in templates. On the other hand it separates
+    template code and python code in expressions.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+import re
+import sys
+
+from operator import itemgetter
+from collections import deque
+# from jinja2.exceptions import TemplateSyntaxError
+# from jinja2.utils import LRUCache
+# from jinja2._compat import iteritems, implements_iterator, text_type, intern
+
+
+# cache for the lexers. Exists in order to be able to have multiple
+# environments with the same lexer
+_lexer_cache = LRUCache(50)
+
+# static regular expressions
+whitespace_re = re.compile(r'\s+', re.U)
+string_re = re.compile(r"('([^'\\]*(?:\\.[^'\\]*)*)'"
+                       r'|"([^"\\]*(?:\\.[^"\\]*)*)")', re.S)
+integer_re = re.compile(r'\d+')
+
+def _make_name_re():
+    try:
+        compile('föö', '<unknown>', 'eval')
+    except SyntaxError:
+        return re.compile(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b')
+
+    import jinja2
+    from jinja2 import _stringdefs
+    name_re = re.compile(r'[%s][%s]*' % (_stringdefs.xid_start,
+                                         _stringdefs.xid_continue))
+
+    # Save some memory here
+    # sys.modules.pop('jinja2._stringdefs')
+    # del _stringdefs
+    # del jinja2._stringdefs
+
+    return name_re
+
+# we use the unicode identifier rule if this python version is able
+# to handle unicode identifiers, otherwise the standard ASCII one.
+name_re = _make_name_re()
+del _make_name_re
+
+float_re = re.compile(r'(?<!\.)\d+\.\d+')
+newline_re = re.compile(r'(\r\n|\r|\n)')
+
+# internal the tokens and keep references to them
+TOKEN_ADD = intern('add')
+TOKEN_ASSIGN = intern('assign')
+TOKEN_COLON = intern('colon')
+TOKEN_COMMA = intern('comma')
+TOKEN_DIV = intern('div')
+TOKEN_DOT = intern('dot')
+TOKEN_EQ = intern('eq')
+TOKEN_FLOORDIV = intern('floordiv')
+TOKEN_GT = intern('gt')
+TOKEN_GTEQ = intern('gteq')
+TOKEN_LBRACE = intern('lbrace')
+TOKEN_LBRACKET = intern('lbracket')
+TOKEN_LPAREN = intern('lparen')
+TOKEN_LT = intern('lt')
+TOKEN_LTEQ = intern('lteq')
+TOKEN_MOD = intern('mod')
+TOKEN_MUL = intern('mul')
+TOKEN_NE = intern('ne')
+TOKEN_PIPE = intern('pipe')
+TOKEN_POW = intern('pow')
+TOKEN_RBRACE = intern('rbrace')
+TOKEN_RBRACKET = intern('rbracket')
+TOKEN_RPAREN = intern('rparen')
+TOKEN_SEMICOLON = intern('semicolon')
+TOKEN_SUB = intern('sub')
+TOKEN_TILDE = intern('tilde')
+TOKEN_WHITESPACE = intern('whitespace')
+TOKEN_FLOAT = intern('float')
+TOKEN_INTEGER = intern('integer')
+TOKEN_NAME = intern('name')
+TOKEN_STRING = intern('string')
+TOKEN_OPERATOR = intern('operator')
+TOKEN_BLOCK_BEGIN = intern('block_begin')
+TOKEN_BLOCK_END = intern('block_end')
+TOKEN_VARIABLE_BEGIN = intern('variable_begin')
+TOKEN_VARIABLE_END = intern('variable_end')
+TOKEN_RAW_BEGIN = intern('raw_begin')
+TOKEN_RAW_END = intern('raw_end')
+TOKEN_COMMENT_BEGIN = intern('comment_begin')
+TOKEN_COMMENT_END = intern('comment_end')
+TOKEN_COMMENT = intern('comment')
+TOKEN_LINESTATEMENT_BEGIN = intern('linestatement_begin')
+TOKEN_LINESTATEMENT_END = intern('linestatement_end')
+TOKEN_LINECOMMENT_BEGIN = intern('linecomment_begin')
+TOKEN_LINECOMMENT_END = intern('linecomment_end')
+TOKEN_LINECOMMENT = intern('linecomment')
+TOKEN_DATA = intern('data')
+TOKEN_INITIAL = intern('initial')
+TOKEN_EOF = intern('eof')
+
+# bind operators to token types
+operators = {
+    '+':            TOKEN_ADD,
+    '-':            TOKEN_SUB,
+    '/':            TOKEN_DIV,
+    '//':           TOKEN_FLOORDIV,
+    '*':            TOKEN_MUL,
+    '%':            TOKEN_MOD,
+    '**':           TOKEN_POW,
+    '~':            TOKEN_TILDE,
+    '[':            TOKEN_LBRACKET,
+    ']':            TOKEN_RBRACKET,
+    '(':            TOKEN_LPAREN,
+    ')':            TOKEN_RPAREN,
+    '{':            TOKEN_LBRACE,
+    '}':            TOKEN_RBRACE,
+    '==':           TOKEN_EQ,
+    '!=':           TOKEN_NE,
+    '>':            TOKEN_GT,
+    '>=':           TOKEN_GTEQ,
+    '<':            TOKEN_LT,
+    '<=':           TOKEN_LTEQ,
+    '=':            TOKEN_ASSIGN,
+    '.':            TOKEN_DOT,
+    ':':            TOKEN_COLON,
+    '|':            TOKEN_PIPE,
+    ',':            TOKEN_COMMA,
+    ';':            TOKEN_SEMICOLON
+}
+
+reverse_operators = dict([(v, k) for k, v in iteritems(operators)])
+assert len(operators) == len(reverse_operators), 'operators dropped'
+operator_re = re.compile('(%s)' % '|'.join(re.escape(x) for x in
+                                           sorted(operators, key=lambda x: -len(x))))
+
+ignored_tokens = frozenset([TOKEN_COMMENT_BEGIN, TOKEN_COMMENT,
+                            TOKEN_COMMENT_END, TOKEN_WHITESPACE,
+                            TOKEN_LINECOMMENT_BEGIN, TOKEN_LINECOMMENT_END,
+                            TOKEN_LINECOMMENT])
+ignore_if_empty = frozenset([TOKEN_WHITESPACE, TOKEN_DATA,
+                             TOKEN_COMMENT, TOKEN_LINECOMMENT])
+
+
+def _describe_token_type(token_type):
+    if token_type in reverse_operators:
+        return reverse_operators[token_type]
+    return {
+        TOKEN_COMMENT_BEGIN:        'begin of comment',
+        TOKEN_COMMENT_END:          'end of comment',
+        TOKEN_COMMENT:              'comment',
+        TOKEN_LINECOMMENT:          'comment',
+        TOKEN_BLOCK_BEGIN:          'begin of statement block',
+        TOKEN_BLOCK_END:            'end of statement block',
+        TOKEN_VARIABLE_BEGIN:       'begin of print statement',
+        TOKEN_VARIABLE_END:         'end of print statement',
+        TOKEN_LINESTATEMENT_BEGIN:  'begin of line statement',
+        TOKEN_LINESTATEMENT_END:    'end of line statement',
+        TOKEN_DATA:                 'template data / text',
+        TOKEN_EOF:                  'end of template'
+    }.get(token_type, token_type)
+
+
+def describe_token(token):
+    """Returns a description of the token."""
+    if token.type == 'name':
+        return token.value
+    return _describe_token_type(token.type)
+
+
+def describe_token_expr(expr):
+    """Like `describe_token` but for token expressions."""
+    if ':' in expr:
+        type, value = expr.split(':', 1)
+        if type == 'name':
+            return value
+    else:
+        type = expr
+    return _describe_token_type(type)
+
+
+def count_newlines(value):
+    """Count the number of newline characters in the string.  This is
+    useful for extensions that filter a stream.
+    """
+    return len(newline_re.findall(value))
+
+
+def compile_rules(environment):
+    """Compiles all the rules from the environment into a list of rules."""
+    e = re.escape
+    rules = [
+        (len(environment.comment_start_string), 'comment',
+         e(environment.comment_start_string)),
+        (len(environment.block_start_string), 'block',
+         e(environment.block_start_string)),
+        (len(environment.variable_start_string), 'variable',
+         e(environment.variable_start_string))
+    ]
+
+    if environment.line_statement_prefix is not None:
+        rules.append((len(environment.line_statement_prefix), 'linestatement',
+                      r'^[ \t\v]*' + e(environment.line_statement_prefix)))
+    if environment.line_comment_prefix is not None:
+        rules.append((len(environment.line_comment_prefix), 'linecomment',
+                      r'(?:^|(?<=\S))[^\S\r\n]*' +
+                      e(environment.line_comment_prefix)))
+
+    return [x[1:] for x in sorted(rules, reverse=True)]
+
+
+class Failure(object):
+    """Class that raises a `TemplateSyntaxError` if called.
+    Used by the `Lexer` to specify known errors.
+    """
+
+    def __init__(self, message, cls=TemplateSyntaxError):
+        self.message = message
+        self.error_class = cls
+
+    def __call__(self, lineno, filename):
+        raise self.error_class(self.message, lineno, filename)
+
+
+class Token(tuple):
+    """Token class."""
+    __slots__ = ()
+    lineno, type, value = (property(itemgetter(x)) for x in range(3))
+
+    def __new__(cls, lineno, type, value):
+        return tuple.__new__(cls, (lineno, intern(str(type)), value))
+
+    def __str__(self):
+        if self.type in reverse_operators:
+            return reverse_operators[self.type]
+        elif self.type == 'name':
+            return self.value
+        return self.type
+
+    def test(self, expr):
+        """Test a token against a token expression.  This can either be a
+        token type or ``'token_type:token_value'``.  This can only test
+        against string values and types.
+        """
+        # here we do a regular string equality check as test_any is usually
+        # passed an iterable of not interned strings.
+        if self.type == expr:
+            return True
+        elif ':' in expr:
+            return expr.split(':', 1) == [self.type, self.value]
+        return False
+
+    def test_any(self, *iterable):
+        """Test against multiple token expressions."""
+        for expr in iterable:
+            if self.test(expr):
+                return True
+        return False
+
+    def __repr__(self):
+        return 'Token(%r, %r, %r)' % (
+            self.lineno,
+            self.type,
+            self.value
+        )
+
+
+@implements_iterator
+class TokenStreamIterator(object):
+    """The iterator for tokenstreams.  Iterate over the stream
+    until the eof token is reached.
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        token = self.stream.current
+        if token.type is TOKEN_EOF:
+            self.stream.close()
+            raise StopIteration()
+        next(self.stream)
+        return token
+
+
+@implements_iterator
+class TokenStream(object):
+    """A token stream is an iterable that yields :class:`Token`\\s.  The
+    parser however does not iterate over it but calls :meth:`next` to go
+    one token ahead.  The current active token is stored as :attr:`current`.
+    """
+
+    def __init__(self, generator, name, filename):
+        self._iter = iter(generator)
+        self._pushed = deque()
+        self.name = name
+        self.filename = filename
+        self.closed = False
+        self.current = Token(1, TOKEN_INITIAL, '')
+        next(self)
+
+    def __iter__(self):
+        return TokenStreamIterator(self)
+
+    def __bool__(self):
+        return bool(self._pushed) or self.current.type is not TOKEN_EOF
+    __nonzero__ = __bool__  # py2
+
+    eos = property(lambda x: not x, doc="Are we at the end of the stream?")
+
+    def push(self, token):
+        """Push a token back to the stream."""
+        self._pushed.append(token)
+
+    def look(self):
+        """Look at the next token."""
+        old_token = next(self)
+        result = self.current
+        self.push(result)
+        self.current = old_token
+        return result
+
+    def skip(self, n=1):
+        """Got n tokens ahead."""
+        for x in range(n):
+            next(self)
+
+    def next_if(self, expr):
+        """Perform the token test and return the token if it matched.
+        Otherwise the return value is `None`.
+        """
+        if self.current.test(expr):
+            return next(self)
+
+    def skip_if(self, expr):
+        """Like :meth:`next_if` but only returns `True` or `False`."""
+        return self.next_if(expr) is not None
+
+    def __next__(self):
+        """Go one token ahead and return the old one"""
+        rv = self.current
+        if self._pushed:
+            self.current = self._pushed.popleft()
+        elif self.current.type is not TOKEN_EOF:
+            try:
+                self.current = next(self._iter)
+            except StopIteration:
+                self.close()
+        return rv
+
+    def close(self):
+        """Close the stream."""
+        self.current = Token(self.current.lineno, TOKEN_EOF, '')
+        self._iter = None
+        self.closed = True
+
+    def expect(self, expr):
+        """Expect a given token type and return it.  This accepts the same
+        argument as :meth:`jinja2.lexer.Token.test`.
+        """
+        if not self.current.test(expr):
+            expr = describe_token_expr(expr)
+            if self.current.type is TOKEN_EOF:
+                raise TemplateSyntaxError('unexpected end of template, '
+                                          'expected %r.' % expr,
+                                          self.current.lineno,
+                                          self.name, self.filename)
+            raise TemplateSyntaxError("expected token %r, got %r" %
+                                      (expr, describe_token(self.current)),
+                                      self.current.lineno,
+                                      self.name, self.filename)
+        try:
+            return self.current
+        finally:
+            next(self)
+
+
+def get_lexer(environment):
+    """Return a lexer which is probably cached."""
+    key = (environment.block_start_string,
+           environment.block_end_string,
+           environment.variable_start_string,
+           environment.variable_end_string,
+           environment.comment_start_string,
+           environment.comment_end_string,
+           environment.line_statement_prefix,
+           environment.line_comment_prefix,
+           environment.trim_blocks,
+           environment.lstrip_blocks,
+           environment.newline_sequence,
+           environment.keep_trailing_newline)
+    lexer = _lexer_cache.get(key)
+    if lexer is None:
+        lexer = Lexer(environment)
+        _lexer_cache[key] = lexer
+    return lexer
+
+
+class Lexer(object):
+    """Class that implements a lexer for a given environment. Automatically
+    created by the environment class, usually you don't have to do that.
+
+    Note that the lexer is not automatically bound to an environment.
+    Multiple environments can share the same lexer.
+    """
+
+    def __init__(self, environment):
+        # shortcuts
+        c = lambda x: re.compile(x, re.M | re.S)
+        e = re.escape
+
+        # lexing rules for tags
+        tag_rules = [
+            (whitespace_re, TOKEN_WHITESPACE, None),
+            (float_re, TOKEN_FLOAT, None),
+            (integer_re, TOKEN_INTEGER, None),
+            (name_re, TOKEN_NAME, None),
+            (string_re, TOKEN_STRING, None),
+            (operator_re, TOKEN_OPERATOR, None)
+        ]
+
+        # assemble the root lexing rule. because "|" is ungreedy
+        # we have to sort by length so that the lexer continues working
+        # as expected when we have parsing rules like <% for block and
+        # <%= for variables. (if someone wants asp like syntax)
+        # variables are just part of the rules if variable processing
+        # is required.
+        root_tag_rules = compile_rules(environment)
+
+        # block suffix if trimming is enabled
+        block_suffix_re = environment.trim_blocks and '\\n?' or ''
+
+        # strip leading spaces if lstrip_blocks is enabled
+        prefix_re = {}
+        if environment.lstrip_blocks:
+            # use '{%+' to manually disable lstrip_blocks behavior
+            no_lstrip_re = e('+')
+            # detect overlap between block and variable or comment strings
+            block_diff = c(r'^%s(.*)' % e(environment.block_start_string))
+            # make sure we don't mistake a block for a variable or a comment
+            m = block_diff.match(environment.comment_start_string)
+            no_lstrip_re += m and r'|%s' % e(m.group(1)) or ''
+            m = block_diff.match(environment.variable_start_string)
+            no_lstrip_re += m and r'|%s' % e(m.group(1)) or ''
+
+            # detect overlap between comment and variable strings
+            comment_diff = c(r'^%s(.*)' % e(environment.comment_start_string))
+            m = comment_diff.match(environment.variable_start_string)
+            no_variable_re = m and r'(?!%s)' % e(m.group(1)) or ''
+
+            lstrip_re = r'^[ \t]*'
+            block_prefix_re = r'%s%s(?!%s)|%s\+?' % (
+                lstrip_re,
+                e(environment.block_start_string),
+                no_lstrip_re,
+                e(environment.block_start_string),
+            )
+            comment_prefix_re = r'%s%s%s|%s\+?' % (
+                lstrip_re,
+                e(environment.comment_start_string),
+                no_variable_re,
+                e(environment.comment_start_string),
+            )
+            prefix_re['block'] = block_prefix_re
+            prefix_re['comment'] = comment_prefix_re
+        else:
+            block_prefix_re = '%s' % e(environment.block_start_string)
+
+        self.newline_sequence = environment.newline_sequence
+        self.keep_trailing_newline = environment.keep_trailing_newline
+
+        # global lexing rules
+        self.rules = {
+            'root': [
+                # directives
+                (c('(.*?)(?:%s)' % '|'.join(
+                    [r'(?P<raw_begin>(?:\s*%s\-|%s)\s*raw\s*(?:\-%s\s*|%s))' % (
+                        e(environment.block_start_string),
+                        block_prefix_re,
+                        e(environment.block_end_string),
+                        e(environment.block_end_string)
+                    )] + [
+                        r'(?P<%s_begin>\s*%s\-|%s)' % (n, r, prefix_re.get(n,r))
+                        for n, r in root_tag_rules
+                        ])), (TOKEN_DATA, '#bygroup'), '#bygroup'),
+                # data
+                (c('.+'), TOKEN_DATA, None)
+            ],
+            # comments
+            TOKEN_COMMENT_BEGIN: [
+                (c(r'(.*?)((?:\-%s\s*|%s)%s)' % (
+                    e(environment.comment_end_string),
+                    e(environment.comment_end_string),
+                    block_suffix_re
+                )), (TOKEN_COMMENT, TOKEN_COMMENT_END), '#pop'),
+                (c('(.)'), (Failure('Missing end of comment tag'),), None)
+            ],
+            # blocks
+            TOKEN_BLOCK_BEGIN: [
+                                   (c(r'(?:\-%s\s*|%s)%s' % (
+                                       e(environment.block_end_string),
+                                       e(environment.block_end_string),
+                                       block_suffix_re
+                                   )), TOKEN_BLOCK_END, '#pop'),
+                               ] + tag_rules,
+            # variables
+            TOKEN_VARIABLE_BEGIN: [
+                                      (c(r'\-%s\s*|%s' % (
+                                          e(environment.variable_end_string),
+                                          e(environment.variable_end_string)
+                                      )), TOKEN_VARIABLE_END, '#pop')
+                                  ] + tag_rules,
+            # raw block
+            TOKEN_RAW_BEGIN: [
+                (c(r'(.*?)((?:\s*%s\-|%s)\s*endraw\s*(?:\-%s\s*|%s%s))' % (
+                    e(environment.block_start_string),
+                    block_prefix_re,
+                    e(environment.block_end_string),
+                    e(environment.block_end_string),
+                    block_suffix_re
+                )), (TOKEN_DATA, TOKEN_RAW_END), '#pop'),
+                (c('(.)'), (Failure('Missing end of raw directive'),), None)
+            ],
+            # line statements
+            TOKEN_LINESTATEMENT_BEGIN: [
+                                           (c(r'\s*(\n|$)'), TOKEN_LINESTATEMENT_END, '#pop')
+                                       ] + tag_rules,
+            # line comments
+            TOKEN_LINECOMMENT_BEGIN: [
+                (c(r'(.*?)()(?=\n|$)'), (TOKEN_LINECOMMENT,
+                                         TOKEN_LINECOMMENT_END), '#pop')
+            ]
+        }
+
+    def _normalize_newlines(self, value):
+        """Called for strings and template data to normalize it to unicode."""
+        return newline_re.sub(self.newline_sequence, value)
+
+    def tokenize(self, source, name=None, filename=None, state=None):
+        """Calls tokeniter + tokenize and wraps it in a token stream.
+        """
+        stream = self.tokeniter(source, name, filename, state)
+        return TokenStream(self.wrap(stream, name, filename), name, filename)
+
+    def wrap(self, stream, name=None, filename=None):
+        """This is called with the stream as returned by `tokenize` and wraps
+        every token in a :class:`Token` and converts the value.
+        """
+        for lineno, token, value in stream:
+            if token in ignored_tokens:
+                continue
+            elif token == 'linestatement_begin':
+                token = 'block_begin'
+            elif token == 'linestatement_end':
+                token = 'block_end'
+            # we are not interested in those tokens in the parser
+            elif token in ('raw_begin', 'raw_end'):
+                continue
+            elif token == 'data':
+                value = self._normalize_newlines(value)
+            elif token == 'keyword':
+                token = value
+            elif token == 'name':
+                value = str(value)
+            elif token == 'string':
+                # try to unescape string
+                try:
+                    value = self._normalize_newlines(value[1:-1]) \
+                        .encode('ascii', 'backslashreplace') \
+                        .decode('unicode-escape')
+                except Exception as e:
+                    msg = str(e).split(':')[-1].strip()
+                    raise TemplateSyntaxError(msg, lineno, name, filename)
+            elif token == 'integer':
+                value = int(value)
+            elif token == 'float':
+                value = float(value)
+            elif token == 'operator':
+                token = operators[value]
+            yield Token(lineno, token, value)
+
+    def tokeniter(self, source, name, filename=None, state=None):
+        """This method tokenizes the text and returns the tokens in a
+        generator.  Use this method if you just want to tokenize a template.
+        """
+        source = text_type(source)
+        lines = source.splitlines()
+        if self.keep_trailing_newline and source:
+            for newline in ('\r\n', '\r', '\n'):
+                if source.endswith(newline):
+                    lines.append('')
+                    break
+        source = '\n'.join(lines)
+        pos = 0
+        lineno = 1
+        stack = ['root']
+        if state is not None and state != 'root':
+            assert state in ('variable', 'block'), 'invalid state'
+            stack.append(state + '_begin')
+        else:
+            state = 'root'
+        statetokens = self.rules[stack[-1]]
+        source_length = len(source)
+
+        balancing_stack = []
+
+        while 1:
+            # tokenizer loop
+            for regex, tokens, new_state in statetokens:
+                m = regex.match(source, pos)
+                # if no match we try again with the next rule
+                if m is None:
+                    continue
+
+                # we only match blocks and variables if braces / parentheses
+                # are balanced. continue parsing with the lower rule which
+                # is the operator rule. do this only if the end tags look
+                # like operators
+                if balancing_stack and \
+                                tokens in ('variable_end', 'block_end',
+                                           'linestatement_end'):
+                    continue
+
+                # tuples support more options
+                if isinstance(tokens, tuple):
+                    for idx, token in enumerate(tokens):
+                        # failure group
+                        if token.__class__ is Failure:
+                            raise token(lineno, filename)
+                        # bygroup is a bit more complex, in that case we
+                        # yield for the current token the first named
+                        # group that matched
+                        elif token == '#bygroup':
+                            for key, value in iteritems(m.groupdict()):
+                                if value is not None:
+                                    yield lineno, key, value
+                                    lineno += value.count('\n')
+                                    break
+                            else:
+                                raise RuntimeError('%r wanted to resolve '
+                                                   'the token dynamically'
+                                                   ' but no group matched'
+                                                   % regex)
+                        # normal group
+                        else:
+                            data = m.group(idx + 1)
+                            if data or token not in ignore_if_empty:
+                                yield lineno, token, data
+                            lineno += data.count('\n')
+
+                # strings as token just are yielded as it.
+                else:
+                    data = m.group()
+                    # update brace/parentheses balance
+                    if tokens == 'operator':
+                        if data == '{':
+                            balancing_stack.append('}')
+                        elif data == '(':
+                            balancing_stack.append(')')
+                        elif data == '[':
+                            balancing_stack.append(']')
+                        elif data in ('}', ')', ']'):
+                            if not balancing_stack:
+                                raise TemplateSyntaxError('unexpected \'%s\'' %
+                                                          data, lineno, name,
+                                                          filename)
+                            expected_op = balancing_stack.pop()
+                            if expected_op != data:
+                                raise TemplateSyntaxError('unexpected \'%s\', '
+                                                          'expected \'%s\'' %
+                                                          (data, expected_op),
+                                                          lineno, name,
+                                                          filename)
+                    # yield items
+                    if data or tokens not in ignore_if_empty:
+                        yield lineno, tokens, data
+                    lineno += data.count('\n')
+
+                # fetch new position into new variable so that we can check
+                # if there is a internal parsing error which would result
+                # in an infinite loop
+                pos2 = m.end()
+
+                # handle state changes
+                if new_state is not None:
+                    # remove the uppermost state
+                    if new_state == '#pop':
+                        stack.pop()
+                    # resolve the new state by group checking
+                    elif new_state == '#bygroup':
+                        for key, value in iteritems(m.groupdict()):
+                            if value is not None:
+                                stack.append(key)
+                                break
+                        else:
+                            raise RuntimeError('%r wanted to resolve the '
+                                               'new state dynamically but'
+                                               ' no group matched' %
+                                               regex)
+                    # direct state name given
+                    else:
+                        stack.append(new_state)
+                    statetokens = self.rules[stack[-1]]
+                # we are still at the same position and no stack change.
+                # this means a loop without break condition, avoid that and
+                # raise error
+                elif pos2 == pos:
+                    raise RuntimeError('%r yielded empty string without '
+                                       'stack change' % regex)
+                # publish new function and start again
+                pos = pos2
+                break
+            # if loop terminated without break we haven't found a single match
+            # either we are at the end of the file or we have a problem
+            else:
+                # end of text
+                if pos >= source_length:
+                    return
+                # something went wrong
+                raise TemplateSyntaxError('unexpected char %r at %d' %
+                                          (source[pos], pos), lineno,
+                                          name, filename)
+
+
+
+
+
+"""
+    jinja2.parser
+    ~~~~~~~~~~~~~
+
+    Implements the template parser.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+from jinja2 import nodes
+# from jinja2.exceptions import TemplateSyntaxError, TemplateAssertionError
+# from jinja2.lexer import describe_token, describe_token_expr
+# from jinja2._compat import imap
+
+
+_statement_keywords = frozenset(['for', 'if', 'block', 'extends', 'print',
+                                 'macro', 'include', 'from', 'import',
+                                 'set', 'with', 'autoescape'])
+_compare_operators = frozenset(['eq', 'ne', 'lt', 'lteq', 'gt', 'gteq'])
+
+_math_nodes = {
+    'add': nodes.Add,
+    'sub': nodes.Sub,
+    'mul': nodes.Mul,
+    'div': nodes.Div,
+    'floordiv': nodes.FloorDiv,
+    'mod': nodes.Mod,
+}
+
+
+class Parser(object):
+    """This is the central parsing class Jinja2 uses.  It's passed to
+    extensions and can be used to parse expressions or statements.
+    """
+
+    def __init__(self, environment, source, name=None, filename=None,
+                 state=None):
+        self.environment = environment
+        self.stream = environment._tokenize(source, name, filename, state)
+        self.name = name
+        self.filename = filename
+        self.closed = False
+        self.extensions = {}
+        for extension in environment.iter_extensions():
+            for tag in extension.tags:
+                self.extensions[tag] = extension.parse
+        self._last_identifier = 0
+        self._tag_stack = []
+        self._end_token_stack = []
+
+    def fail(self, msg, lineno=None, exc=TemplateSyntaxError):
+        """Convenience method that raises `exc` with the message, passed
+        line number or last line number as well as the current name and
+        filename.
+        """
+        if lineno is None:
+            lineno = self.stream.current.lineno
+        raise exc(msg, lineno, self.name, self.filename)
+
+    def _fail_ut_eof(self, name, end_token_stack, lineno):
+        expected = []
+        for exprs in end_token_stack:
+            expected.extend(imap(describe_token_expr, exprs))
+        if end_token_stack:
+            currently_looking = ' or '.join(
+                "'%s'" % describe_token_expr(expr)
+                for expr in end_token_stack[-1])
+        else:
+            currently_looking = None
+
+        if name is None:
+            message = ['Unexpected end of template.']
+        else:
+            message = ['Encountered unknown tag \'%s\'.' % name]
+
+        if currently_looking:
+            if name is not None and name in expected:
+                message.append('You probably made a nesting mistake. Jinja '
+                               'is expecting this tag, but currently looking '
+                               'for %s.' % currently_looking)
+            else:
+                message.append('Jinja was looking for the following tags: '
+                               '%s.' % currently_looking)
+
+        if self._tag_stack:
+            message.append('The innermost block that needs to be '
+                           'closed is \'%s\'.' % self._tag_stack[-1])
+
+        self.fail(' '.join(message), lineno)
+
+    def fail_unknown_tag(self, name, lineno=None):
+        """Called if the parser encounters an unknown tag.  Tries to fail
+        with a human readable error message that could help to identify
+        the problem.
+        """
+        return self._fail_ut_eof(name, self._end_token_stack, lineno)
+
+    def fail_eof(self, end_tokens=None, lineno=None):
+        """Like fail_unknown_tag but for end of template situations."""
+        stack = list(self._end_token_stack)
+        if end_tokens is not None:
+            stack.append(end_tokens)
+        return self._fail_ut_eof(None, stack, lineno)
+
+    def is_tuple_end(self, extra_end_rules=None):
+        """Are we at the end of a tuple?"""
+        if self.stream.current.type in ('variable_end', 'block_end', 'rparen'):
+            return True
+        elif extra_end_rules is not None:
+            return self.stream.current.test_any(extra_end_rules)
+        return False
+
+    def free_identifier(self, lineno=None):
+        """Return a new free identifier as :class:`~jinja2.nodes.InternalName`."""
+        self._last_identifier += 1
+        rv = object.__new__(nodes.InternalName)
+        nodes.Node.__init__(rv, 'fi%d' % self._last_identifier, lineno=lineno)
+        return rv
+
+    def parse_statement(self):
+        """Parse a single statement."""
+        token = self.stream.current
+        if token.type != 'name':
+            self.fail('tag name expected', token.lineno)
+        self._tag_stack.append(token.value)
+        pop_tag = True
+        try:
+            if token.value in _statement_keywords:
+                return getattr(self, 'parse_' + self.stream.current.value)()
+            if token.value == 'call':
+                return self.parse_call_block()
+            if token.value == 'filter':
+                return self.parse_filter_block()
+            ext = self.extensions.get(token.value)
+            if ext is not None:
+                return ext(self)
+
+            # did not work out, remove the token we pushed by accident
+            # from the stack so that the unknown tag fail function can
+            # produce a proper error message.
+            self._tag_stack.pop()
+            pop_tag = False
+            self.fail_unknown_tag(token.value, token.lineno)
+        finally:
+            if pop_tag:
+                self._tag_stack.pop()
+
+    def parse_statements(self, end_tokens, drop_needle=False):
+        """Parse multiple statements into a list until one of the end tokens
+        is reached.  This is used to parse the body of statements as it also
+        parses template data if appropriate.  The parser checks first if the
+        current token is a colon and skips it if there is one.  Then it checks
+        for the block end and parses until if one of the `end_tokens` is
+        reached.  Per default the active token in the stream at the end of
+        the call is the matched end token.  If this is not wanted `drop_needle`
+        can be set to `True` and the end token is removed.
+        """
+        # the first token may be a colon for python compatibility
+        self.stream.skip_if('colon')
+
+        # in the future it would be possible to add whole code sections
+        # by adding some sort of end of statement token and parsing those here.
+        self.stream.expect('block_end')
+        result = self.subparse(end_tokens)
+
+        # we reached the end of the template too early, the subparser
+        # does not check for this, so we do that now
+        if self.stream.current.type == 'eof':
+            self.fail_eof(end_tokens)
+
+        if drop_needle:
+            next(self.stream)
+        return result
+
+    def parse_set(self):
+        """Parse an assign statement."""
+        lineno = next(self.stream).lineno
+        target = self.parse_assign_target()
+        if self.stream.skip_if('assign'):
+            expr = self.parse_tuple()
+            return nodes.Assign(target, expr, lineno=lineno)
+        body = self.parse_statements(('name:endset',),
+                                     drop_needle=True)
+        return nodes.AssignBlock(target, body, lineno=lineno)
+
+    def parse_for(self):
+        """Parse a for loop."""
+        lineno = self.stream.expect('name:for').lineno
+        target = self.parse_assign_target(extra_end_rules=('name:in',))
+        self.stream.expect('name:in')
+        iter = self.parse_tuple(with_condexpr=False,
+                                extra_end_rules=('name:recursive',))
+        test = None
+        if self.stream.skip_if('name:if'):
+            test = self.parse_expression()
+        recursive = self.stream.skip_if('name:recursive')
+        body = self.parse_statements(('name:endfor', 'name:else'))
+        if next(self.stream).value == 'endfor':
+            else_ = []
+        else:
+            else_ = self.parse_statements(('name:endfor',), drop_needle=True)
+        return nodes.For(target, iter, body, else_, test,
+                         recursive, lineno=lineno)
+
+    def parse_if(self):
+        """Parse an if construct."""
+        node = result = nodes.If(lineno=self.stream.expect('name:if').lineno)
+        while 1:
+            node.test = self.parse_tuple(with_condexpr=False)
+            node.body = self.parse_statements(('name:elif', 'name:else',
+                                               'name:endif'))
+            token = next(self.stream)
+            if token.test('name:elif'):
+                new_node = nodes.If(lineno=self.stream.current.lineno)
+                node.else_ = [new_node]
+                node = new_node
+                continue
+            elif token.test('name:else'):
+                node.else_ = self.parse_statements(('name:endif',),
+                                                   drop_needle=True)
+            else:
+                node.else_ = []
+            break
+        return result
+
+    def parse_with(self):
+        node = nodes.With(lineno=next(self.stream).lineno)
+        targets = []
+        values = []
+        while self.stream.current.type != 'block_end':
+            lineno = self.stream.current.lineno
+            if targets:
+                self.stream.expect('comma')
+            target = self.parse_assign_target()
+            target.set_ctx('param')
+            targets.append(target)
+            self.stream.expect('assign')
+            values.append(self.parse_expression())
+        node.targets = targets
+        node.values = values
+        node.body = self.parse_statements(('name:endwith',),
+                                          drop_needle=True)
+        return node
+
+    def parse_autoescape(self):
+        node = nodes.ScopedEvalContextModifier(lineno=next(self.stream).lineno)
+        node.options = [
+            nodes.Keyword('autoescape', self.parse_expression())
+        ]
+        node.body = self.parse_statements(('name:endautoescape',),
+                                          drop_needle=True)
+        return nodes.Scope([node])
+
+    def parse_block(self):
+        node = nodes.Block(lineno=next(self.stream).lineno)
+        node.name = self.stream.expect('name').value
+        node.scoped = self.stream.skip_if('name:scoped')
+
+        # common problem people encounter when switching from django
+        # to jinja.  we do not support hyphens in block names, so let's
+        # raise a nicer error message in that case.
+        if self.stream.current.type == 'sub':
+            self.fail('Block names in Jinja have to be valid Python '
+                      'identifiers and may not contain hyphens, use an '
+                      'underscore instead.')
+
+        node.body = self.parse_statements(('name:endblock',), drop_needle=True)
+        self.stream.skip_if('name:' + node.name)
+        return node
+
+    def parse_extends(self):
+        node = nodes.Extends(lineno=next(self.stream).lineno)
+        node.template = self.parse_expression()
+        return node
+
+    def parse_import_context(self, node, default):
+        if self.stream.current.test_any('name:with', 'name:without') and \
+                self.stream.look().test('name:context'):
+            node.with_context = next(self.stream).value == 'with'
+            self.stream.skip()
+        else:
+            node.with_context = default
+        return node
+
+    def parse_include(self):
+        node = nodes.Include(lineno=next(self.stream).lineno)
+        node.template = self.parse_expression()
+        if self.stream.current.test('name:ignore') and \
+                self.stream.look().test('name:missing'):
+            node.ignore_missing = True
+            self.stream.skip(2)
+        else:
+            node.ignore_missing = False
+        return self.parse_import_context(node, True)
+
+    def parse_import(self):
+        node = nodes.Import(lineno=next(self.stream).lineno)
+        node.template = self.parse_expression()
+        self.stream.expect('name:as')
+        node.target = self.parse_assign_target(name_only=True).name
+        return self.parse_import_context(node, False)
+
+    def parse_from(self):
+        node = nodes.FromImport(lineno=next(self.stream).lineno)
+        node.template = self.parse_expression()
+        self.stream.expect('name:import')
+        node.names = []
+
+        def parse_context():
+            if self.stream.current.value in ('with', 'without') and \
+                    self.stream.look().test('name:context'):
+                node.with_context = next(self.stream).value == 'with'
+                self.stream.skip()
+                return True
+            return False
+
+        while 1:
+            if node.names:
+                self.stream.expect('comma')
+            if self.stream.current.type == 'name':
+                if parse_context():
+                    break
+                target = self.parse_assign_target(name_only=True)
+                if target.name.startswith('_'):
+                    self.fail('names starting with an underline can not '
+                              'be imported', target.lineno,
+                              exc=TemplateAssertionError)
+                if self.stream.skip_if('name:as'):
+                    alias = self.parse_assign_target(name_only=True)
+                    node.names.append((target.name, alias.name))
+                else:
+                    node.names.append(target.name)
+                if parse_context() or self.stream.current.type != 'comma':
+                    break
+            else:
+                break
+        if not hasattr(node, 'with_context'):
+            node.with_context = False
+            self.stream.skip_if('comma')
+        return node
+
+    def parse_signature(self, node):
+        node.args = args = []
+        node.defaults = defaults = []
+        self.stream.expect('lparen')
+        while self.stream.current.type != 'rparen':
+            if args:
+                self.stream.expect('comma')
+            arg = self.parse_assign_target(name_only=True)
+            arg.set_ctx('param')
+            if self.stream.skip_if('assign'):
+                defaults.append(self.parse_expression())
+            elif defaults:
+                self.fail('non-default argument follows default argument')
+            args.append(arg)
+        self.stream.expect('rparen')
+
+    def parse_call_block(self):
+        node = nodes.CallBlock(lineno=next(self.stream).lineno)
+        if self.stream.current.type == 'lparen':
+            self.parse_signature(node)
+        else:
+            node.args = []
+            node.defaults = []
+
+        node.call = self.parse_expression()
+        if not isinstance(node.call, nodes.Call):
+            self.fail('expected call', node.lineno)
+        node.body = self.parse_statements(('name:endcall',), drop_needle=True)
+        return node
+
+    def parse_filter_block(self):
+        node = nodes.FilterBlock(lineno=next(self.stream).lineno)
+        node.filter = self.parse_filter(None, start_inline=True)
+        node.body = self.parse_statements(('name:endfilter',),
+                                          drop_needle=True)
+        return node
+
+    def parse_macro(self):
+        node = nodes.Macro(lineno=next(self.stream).lineno)
+        node.name = self.parse_assign_target(name_only=True).name
+        self.parse_signature(node)
+        node.body = self.parse_statements(('name:endmacro',),
+                                          drop_needle=True)
+        return node
+
+    def parse_print(self):
+        node = nodes.Output(lineno=next(self.stream).lineno)
+        node.nodes = []
+        while self.stream.current.type != 'block_end':
+            if node.nodes:
+                self.stream.expect('comma')
+            node.nodes.append(self.parse_expression())
+        return node
+
+    def parse_assign_target(self, with_tuple=True, name_only=False,
+                            extra_end_rules=None):
+        """Parse an assignment target.  As Jinja2 allows assignments to
+        tuples, this function can parse all allowed assignment targets.  Per
+        default assignments to tuples are parsed, that can be disable however
+        by setting `with_tuple` to `False`.  If only assignments to names are
+        wanted `name_only` can be set to `True`.  The `extra_end_rules`
+        parameter is forwarded to the tuple parsing function.
+        """
+        if name_only:
+            token = self.stream.expect('name')
+            target = nodes.Name(token.value, 'store', lineno=token.lineno)
+        else:
+            if with_tuple:
+                target = self.parse_tuple(simplified=True,
+                                          extra_end_rules=extra_end_rules)
+            else:
+                target = self.parse_primary()
+            target.set_ctx('store')
+        if not target.can_assign():
+            self.fail('can\'t assign to %r' % target.__class__.
+                      __name__.lower(), target.lineno)
+        return target
+
+    def parse_expression(self, with_condexpr=True):
+        """Parse an expression.  Per default all expressions are parsed, if
+        the optional `with_condexpr` parameter is set to `False` conditional
+        expressions are not parsed.
+        """
+        if with_condexpr:
+            return self.parse_condexpr()
+        return self.parse_or()
+
+    def parse_condexpr(self):
+        lineno = self.stream.current.lineno
+        expr1 = self.parse_or()
+        while self.stream.skip_if('name:if'):
+            expr2 = self.parse_or()
+            if self.stream.skip_if('name:else'):
+                expr3 = self.parse_condexpr()
+            else:
+                expr3 = None
+            expr1 = nodes.CondExpr(expr2, expr1, expr3, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return expr1
+
+    def parse_or(self):
+        lineno = self.stream.current.lineno
+        left = self.parse_and()
+        while self.stream.skip_if('name:or'):
+            right = self.parse_and()
+            left = nodes.Or(left, right, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return left
+
+    def parse_and(self):
+        lineno = self.stream.current.lineno
+        left = self.parse_not()
+        while self.stream.skip_if('name:and'):
+            right = self.parse_not()
+            left = nodes.And(left, right, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return left
+
+    def parse_not(self):
+        if self.stream.current.test('name:not'):
+            lineno = next(self.stream).lineno
+            return nodes.Not(self.parse_not(), lineno=lineno)
+        return self.parse_compare()
+
+    def parse_compare(self):
+        lineno = self.stream.current.lineno
+        expr = self.parse_math1()
+        ops = []
+        while 1:
+            token_type = self.stream.current.type
+            if token_type in _compare_operators:
+                next(self.stream)
+                ops.append(nodes.Operand(token_type, self.parse_math1()))
+            elif self.stream.skip_if('name:in'):
+                ops.append(nodes.Operand('in', self.parse_math1()))
+            elif (self.stream.current.test('name:not') and
+                      self.stream.look().test('name:in')):
+                self.stream.skip(2)
+                ops.append(nodes.Operand('notin', self.parse_math1()))
+            else:
+                break
+            lineno = self.stream.current.lineno
+        if not ops:
+            return expr
+        return nodes.Compare(expr, ops, lineno=lineno)
+
+    def parse_math1(self):
+        lineno = self.stream.current.lineno
+        left = self.parse_concat()
+        while self.stream.current.type in ('add', 'sub'):
+            cls = _math_nodes[self.stream.current.type]
+            next(self.stream)
+            right = self.parse_concat()
+            left = cls(left, right, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return left
+
+    def parse_concat(self):
+        lineno = self.stream.current.lineno
+        args = [self.parse_math2()]
+        while self.stream.current.type == 'tilde':
+            next(self.stream)
+            args.append(self.parse_math2())
+        if len(args) == 1:
+            return args[0]
+        return nodes.Concat(args, lineno=lineno)
+
+    def parse_math2(self):
+        lineno = self.stream.current.lineno
+        left = self.parse_pow()
+        while self.stream.current.type in ('mul', 'div', 'floordiv', 'mod'):
+            cls = _math_nodes[self.stream.current.type]
+            next(self.stream)
+            right = self.parse_pow()
+            left = cls(left, right, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return left
+
+    def parse_pow(self):
+        lineno = self.stream.current.lineno
+        left = self.parse_unary()
+        while self.stream.current.type == 'pow':
+            next(self.stream)
+            right = self.parse_unary()
+            left = nodes.Pow(left, right, lineno=lineno)
+            lineno = self.stream.current.lineno
+        return left
+
+    def parse_unary(self, with_filter=True):
+        token_type = self.stream.current.type
+        lineno = self.stream.current.lineno
+        if token_type == 'sub':
+            next(self.stream)
+            node = nodes.Neg(self.parse_unary(False), lineno=lineno)
+        elif token_type == 'add':
+            next(self.stream)
+            node = nodes.Pos(self.parse_unary(False), lineno=lineno)
+        else:
+            node = self.parse_primary()
+        node = self.parse_postfix(node)
+        if with_filter:
+            node = self.parse_filter_expr(node)
+        return node
+
+    def parse_primary(self):
+        token = self.stream.current
+        if token.type == 'name':
+            if token.value in ('true', 'false', 'True', 'False'):
+                node = nodes.Const(token.value in ('true', 'True'),
+                                   lineno=token.lineno)
+            elif token.value in ('none', 'None'):
+                node = nodes.Const(None, lineno=token.lineno)
+            else:
+                node = nodes.Name(token.value, 'load', lineno=token.lineno)
+            next(self.stream)
+        elif token.type == 'string':
+            next(self.stream)
+            buf = [token.value]
+            lineno = token.lineno
+            while self.stream.current.type == 'string':
+                buf.append(self.stream.current.value)
+                next(self.stream)
+            node = nodes.Const(''.join(buf), lineno=lineno)
+        elif token.type in ('integer', 'float'):
+            next(self.stream)
+            node = nodes.Const(token.value, lineno=token.lineno)
+        elif token.type == 'lparen':
+            next(self.stream)
+            node = self.parse_tuple(explicit_parentheses=True)
+            self.stream.expect('rparen')
+        elif token.type == 'lbracket':
+            node = self.parse_list()
+        elif token.type == 'lbrace':
+            node = self.parse_dict()
+        else:
+            self.fail("unexpected '%s'" % describe_token(token), token.lineno)
+        return node
+
+    def parse_tuple(self, simplified=False, with_condexpr=True,
+                    extra_end_rules=None, explicit_parentheses=False):
+        """Works like `parse_expression` but if multiple expressions are
+        delimited by a comma a :class:`~jinja2.nodes.Tuple` node is created.
+        This method could also return a regular expression instead of a tuple
+        if no commas where found.
+
+        The default parsing mode is a full tuple.  If `simplified` is `True`
+        only names and literals are parsed.  The `no_condexpr` parameter is
+        forwarded to :meth:`parse_expression`.
+
+        Because tuples do not require delimiters and may end in a bogus comma
+        an extra hint is needed that marks the end of a tuple.  For example
+        for loops support tuples between `for` and `in`.  In that case the
+        `extra_end_rules` is set to ``['name:in']``.
+
+        `explicit_parentheses` is true if the parsing was triggered by an
+        expression in parentheses.  This is used to figure out if an empty
+        tuple is a valid expression or not.
+        """
+        lineno = self.stream.current.lineno
+        if simplified:
+            parse = self.parse_primary
+        elif with_condexpr:
+            parse = self.parse_expression
+        else:
+            parse = lambda: self.parse_expression(with_condexpr=False)
+        args = []
+        is_tuple = False
+        while 1:
+            if args:
+                self.stream.expect('comma')
+            if self.is_tuple_end(extra_end_rules):
+                break
+            args.append(parse())
+            if self.stream.current.type == 'comma':
+                is_tuple = True
+            else:
+                break
+            lineno = self.stream.current.lineno
+
+        if not is_tuple:
+            if args:
+                return args[0]
+
+            # if we don't have explicit parentheses, an empty tuple is
+            # not a valid expression.  This would mean nothing (literally
+            # nothing) in the spot of an expression would be an empty
+            # tuple.
+            if not explicit_parentheses:
+                self.fail('Expected an expression, got \'%s\'' %
+                          describe_token(self.stream.current))
+
+        return nodes.Tuple(args, 'load', lineno=lineno)
+
+    def parse_list(self):
+        token = self.stream.expect('lbracket')
+        items = []
+        while self.stream.current.type != 'rbracket':
+            if items:
+                self.stream.expect('comma')
+            if self.stream.current.type == 'rbracket':
+                break
+            items.append(self.parse_expression())
+        self.stream.expect('rbracket')
+        return nodes.List(items, lineno=token.lineno)
+
+    def parse_dict(self):
+        token = self.stream.expect('lbrace')
+        items = []
+        while self.stream.current.type != 'rbrace':
+            if items:
+                self.stream.expect('comma')
+            if self.stream.current.type == 'rbrace':
+                break
+            key = self.parse_expression()
+            self.stream.expect('colon')
+            value = self.parse_expression()
+            items.append(nodes.Pair(key, value, lineno=key.lineno))
+        self.stream.expect('rbrace')
+        return nodes.Dict(items, lineno=token.lineno)
+
+    def parse_postfix(self, node):
+        while 1:
+            token_type = self.stream.current.type
+            if token_type == 'dot' or token_type == 'lbracket':
+                node = self.parse_subscript(node)
+            # calls are valid both after postfix expressions (getattr
+            # and getitem) as well as filters and tests
+            elif token_type == 'lparen':
+                node = self.parse_call(node)
+            else:
+                break
+        return node
+
+    def parse_filter_expr(self, node):
+        while 1:
+            token_type = self.stream.current.type
+            if token_type == 'pipe':
+                node = self.parse_filter(node)
+            elif token_type == 'name' and self.stream.current.value == 'is':
+                node = self.parse_test(node)
+            # calls are valid both after postfix expressions (getattr
+            # and getitem) as well as filters and tests
+            elif token_type == 'lparen':
+                node = self.parse_call(node)
+            else:
+                break
+        return node
+
+    def parse_subscript(self, node):
+        token = next(self.stream)
+        if token.type == 'dot':
+            attr_token = self.stream.current
+            next(self.stream)
+            if attr_token.type == 'name':
+                return nodes.Getattr(node, attr_token.value, 'load',
+                                     lineno=token.lineno)
+            elif attr_token.type != 'integer':
+                self.fail('expected name or number', attr_token.lineno)
+            arg = nodes.Const(attr_token.value, lineno=attr_token.lineno)
+            return nodes.Getitem(node, arg, 'load', lineno=token.lineno)
+        if token.type == 'lbracket':
+            args = []
+            while self.stream.current.type != 'rbracket':
+                if args:
+                    self.stream.expect('comma')
+                args.append(self.parse_subscribed())
+            self.stream.expect('rbracket')
+            if len(args) == 1:
+                arg = args[0]
+            else:
+                arg = nodes.Tuple(args, 'load', lineno=token.lineno)
+            return nodes.Getitem(node, arg, 'load', lineno=token.lineno)
+        self.fail('expected subscript expression', self.lineno)
+
+    def parse_subscribed(self):
+        lineno = self.stream.current.lineno
+
+        if self.stream.current.type == 'colon':
+            next(self.stream)
+            args = [None]
+        else:
+            node = self.parse_expression()
+            if self.stream.current.type != 'colon':
+                return node
+            next(self.stream)
+            args = [node]
+
+        if self.stream.current.type == 'colon':
+            args.append(None)
+        elif self.stream.current.type not in ('rbracket', 'comma'):
+            args.append(self.parse_expression())
+        else:
+            args.append(None)
+
+        if self.stream.current.type == 'colon':
+            next(self.stream)
+            if self.stream.current.type not in ('rbracket', 'comma'):
+                args.append(self.parse_expression())
+            else:
+                args.append(None)
+        else:
+            args.append(None)
+
+        return nodes.Slice(lineno=lineno, *args)
+
+    def parse_call(self, node):
+        token = self.stream.expect('lparen')
+        args = []
+        kwargs = []
+        dyn_args = dyn_kwargs = None
+        require_comma = False
+
+        def ensure(expr):
+            if not expr:
+                self.fail('invalid syntax for function call expression',
+                          token.lineno)
+
+        while self.stream.current.type != 'rparen':
+            if require_comma:
+                self.stream.expect('comma')
+                # support for trailing comma
+                if self.stream.current.type == 'rparen':
+                    break
+            if self.stream.current.type == 'mul':
+                ensure(dyn_args is None and dyn_kwargs is None)
+                next(self.stream)
+                dyn_args = self.parse_expression()
+            elif self.stream.current.type == 'pow':
+                ensure(dyn_kwargs is None)
+                next(self.stream)
+                dyn_kwargs = self.parse_expression()
+            else:
+                ensure(dyn_args is None and dyn_kwargs is None)
+                if self.stream.current.type == 'name' and \
+                                self.stream.look().type == 'assign':
+                    key = self.stream.current.value
+                    self.stream.skip(2)
+                    value = self.parse_expression()
+                    kwargs.append(nodes.Keyword(key, value,
+                                                lineno=value.lineno))
+                else:
+                    ensure(not kwargs)
+                    args.append(self.parse_expression())
+
+            require_comma = True
+        self.stream.expect('rparen')
+
+        if node is None:
+            return args, kwargs, dyn_args, dyn_kwargs
+        return nodes.Call(node, args, kwargs, dyn_args, dyn_kwargs,
+                          lineno=token.lineno)
+
+    def parse_filter(self, node, start_inline=False):
+        while self.stream.current.type == 'pipe' or start_inline:
+            if not start_inline:
+                next(self.stream)
+            token = self.stream.expect('name')
+            name = token.value
+            while self.stream.current.type == 'dot':
+                next(self.stream)
+                name += '.' + self.stream.expect('name').value
+            if self.stream.current.type == 'lparen':
+                args, kwargs, dyn_args, dyn_kwargs = self.parse_call(None)
+            else:
+                args = []
+                kwargs = []
+                dyn_args = dyn_kwargs = None
+            node = nodes.Filter(node, name, args, kwargs, dyn_args,
+                                dyn_kwargs, lineno=token.lineno)
+            start_inline = False
+        return node
+
+    def parse_test(self, node):
+        token = next(self.stream)
+        if self.stream.current.test('name:not'):
+            next(self.stream)
+            negated = True
+        else:
+            negated = False
+        name = self.stream.expect('name').value
+        while self.stream.current.type == 'dot':
+            next(self.stream)
+            name += '.' + self.stream.expect('name').value
+        dyn_args = dyn_kwargs = None
+        kwargs = []
+        if self.stream.current.type == 'lparen':
+            args, kwargs, dyn_args, dyn_kwargs = self.parse_call(None)
+        elif (self.stream.current.type in ('name', 'string', 'integer',
+                                           'float', 'lparen', 'lbracket',
+                                           'lbrace') and not
+        self.stream.current.test_any('name:else', 'name:or',
+                                     'name:and')):
+            if self.stream.current.test('name:is'):
+                self.fail('You cannot chain multiple tests with is')
+            args = [self.parse_primary()]
+        else:
+            args = []
+        node = nodes.Test(node, name, args, kwargs, dyn_args,
+                          dyn_kwargs, lineno=token.lineno)
+        if negated:
+            node = nodes.Not(node, lineno=token.lineno)
+        return node
+
+    def subparse(self, end_tokens=None):
+        body = []
+        data_buffer = []
+        add_data = data_buffer.append
+
+        if end_tokens is not None:
+            self._end_token_stack.append(end_tokens)
+
+        def flush_data():
+            if data_buffer:
+                lineno = data_buffer[0].lineno
+                body.append(nodes.Output(data_buffer[:], lineno=lineno))
+                del data_buffer[:]
+
+        try:
+            while self.stream:
+                token = self.stream.current
+                if token.type == 'data':
+                    if token.value:
+                        add_data(nodes.TemplateData(token.value,
+                                                    lineno=token.lineno))
+                    next(self.stream)
+                elif token.type == 'variable_begin':
+                    next(self.stream)
+                    add_data(self.parse_tuple(with_condexpr=True))
+                    self.stream.expect('variable_end')
+                elif token.type == 'block_begin':
+                    flush_data()
+                    next(self.stream)
+                    if end_tokens is not None and \
+                            self.stream.current.test_any(*end_tokens):
+                        return body
+                    rv = self.parse_statement()
+                    if isinstance(rv, list):
+                        body.extend(rv)
+                    else:
+                        body.append(rv)
+                    self.stream.expect('block_end')
+                else:
+                    raise AssertionError('internal parsing error')
+
+            flush_data()
+        finally:
+            if end_tokens is not None:
+                self._end_token_stack.pop()
+
+        return body
+
+    def parse(self):
+        """Parse the whole template into a `Template` node."""
+        result = nodes.Template(self.subparse(), lineno=1)
+        result.set_environment(self.environment)
+        return result
+
+
+"""
+    jinja2.runtime
+    ~~~~~~~~~~~~~~
+
+    Runtime helpers.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD.
+"""
+import sys
+
+from itertools import chain
+from types import MethodType
+
+# from jinja2.nodes import EvalContext, _context_function_types
+# from jinja2.utils import Markup, soft_unicode, escape, missing, concat, \
+#     internalcode, object_type_repr, evalcontextfunction
+# from jinja2.exceptions import UndefinedError, TemplateRuntimeError, \
+#     TemplateNotFound
+# from jinja2._compat import imap, text_type, iteritems, \
+#     implements_iterator, implements_to_string, string_types, PY2, \
+#     with_metaclass
+
+
+# these variables are exported to the template runtime
+__all__ = ['LoopContext', 'TemplateReference', 'Macro', 'Markup',
+           'TemplateRuntimeError', 'missing', 'concat', 'escape',
+           'markup_join', 'unicode_join', 'to_string', 'identity',
+           'TemplateNotFound']
+
+#: the name of the function that is used to convert something into
+#: a string.  We can just use the text type here.
+to_string = text_type
+
+#: the identity function.  Useful for certain things in the environment
+identity = lambda x: x
+
+_last_iteration = object()
+
+
+def markup_join(seq):
+    """Concatenation that escapes if necessary and converts to unicode."""
+    buf = []
+    iterator = imap(soft_unicode, seq)
+    for arg in iterator:
+        buf.append(arg)
+        if hasattr(arg, '__html__'):
+            return Markup(u'').join(chain(buf, iterator))
+    return concat(buf)
+
+
+def unicode_join(seq):
+    """Simple args to unicode conversion and concatenation."""
+    return concat(imap(text_type, seq))
+
+
+def new_context(environment, template_name, blocks, vars=None,
+                shared=None, globals=None, locals=None):
+    """Internal helper to for context creation."""
+    if vars is None:
+        vars = {}
+    if shared:
+        parent = vars
+    else:
+        parent = dict(globals or (), **vars)
+    if locals:
+        # if the parent is shared a copy should be created because
+        # we don't want to modify the dict passed
+        if shared:
+            parent = dict(parent)
+        for key, value in iteritems(locals):
+            if value is not missing:
+                parent[key] = value
+    return environment.context_class(environment, parent, template_name,
+                                     blocks)
+
+
+class TemplateReference(object):
+    """The `self` in templates."""
+
+    def __init__(self, context):
+        self.__context = context
+
+    def __getitem__(self, name):
+        blocks = self.__context.blocks[name]
+        return BlockReference(name, self.__context, blocks, 0)
+
+    def __repr__(self):
+        return '<%s %r>' % (
+            self.__class__.__name__,
+            self.__context.name
+        )
+
+
+def _get_func(x):
+    return getattr(x, '__func__', x)
+
+
+class ContextMeta(type):
+
+    def __new__(cls, name, bases, d):
+        rv = type.__new__(cls, name, bases, d)
+        if bases == ():
+            return rv
+
+        resolve = _get_func(rv.resolve)
+        default_resolve = _get_func(Context.resolve)
+        resolve_or_missing = _get_func(rv.resolve_or_missing)
+        default_resolve_or_missing = _get_func(Context.resolve_or_missing)
+
+        # If we have a changed resolve but no changed default or missing
+        # resolve we invert the call logic.
+        if resolve is not default_resolve and \
+                        resolve_or_missing is default_resolve_or_missing:
+            rv._legacy_resolve_mode = True
+        elif resolve is default_resolve and \
+                        resolve_or_missing is default_resolve_or_missing:
+            rv._fast_resolve_mode = True
+
+        return rv
+
+
+def resolve_or_missing(context, key, missing=missing):
+    if key in context.vars:
+        return context.vars[key]
+    if key in context.parent:
+        return context.parent[key]
+    return missing
+
+
+class Context(with_metaclass(ContextMeta)):
+    """The template context holds the variables of a template.  It stores the
+    values passed to the template and also the names the template exports.
+    Creating instances is neither supported nor useful as it's created
+    automatically at various stages of the template evaluation and should not
+    be created by hand.
+
+    The context is immutable.  Modifications on :attr:`parent` **must not**
+    happen and modifications on :attr:`vars` are allowed from generated
+    template code only.  Template filters and global functions marked as
+    :func:`contextfunction`\\s get the active context passed as first argument
+    and are allowed to access the context read-only.
+
+    The template context supports read only dict operations (`get`,
+    `keys`, `values`, `items`, `iterkeys`, `itervalues`, `iteritems`,
+    `__getitem__`, `__contains__`).  Additionally there is a :meth:`resolve`
+    method that doesn't fail with a `KeyError` but returns an
+    :class:`Undefined` object for missing variables.
+    """
+    # XXX: we want to eventually make this be a deprecation warning and
+    # remove it.
+    _legacy_resolve_mode = False
+    _fast_resolve_mode = False
+
+    def __init__(self, environment, parent, name, blocks):
+        self.parent = parent
+        self.vars = {}
+        self.environment = environment
+        self.eval_ctx = EvalContext(self.environment, name)
+        self.exported_vars = set()
+        self.name = name
+
+        # create the initial mapping of blocks.  Whenever template inheritance
+        # takes place the runtime will update this mapping with the new blocks
+        # from the template.
+        self.blocks = dict((k, [v]) for k, v in iteritems(blocks))
+
+        # In case we detect the fast resolve mode we can set up an alias
+        # here that bypasses the legacy code logic.
+        if self._fast_resolve_mode:
+            self.resolve_or_missing = MethodType(resolve_or_missing, self)
+
+    def super(self, name, current):
+        """Render a parent block."""
+        try:
+            blocks = self.blocks[name]
+            index = blocks.index(current) + 1
+            blocks[index]
+        except LookupError:
+            return self.environment.undefined('there is no parent block '
+                                              'called %r.' % name,
+                                              name='super')
+        return BlockReference(name, self, blocks, index)
+
+    def get(self, key, default=None):
+        """Returns an item from the template context, if it doesn't exist
+        `default` is returned.
+        """
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def resolve(self, key):
+        """Looks up a variable like `__getitem__` or `get` but returns an
+        :class:`Undefined` object with the name of the name looked up.
+        """
+        if self._legacy_resolve_mode:
+            rv = resolve_or_missing(self, key)
+        else:
+            rv = self.resolve_or_missing(key)
+        if rv is missing:
+            return self.environment.undefined(name=key)
+        return rv
+
+    def resolve_or_missing(self, key):
+        """Resolves a variable like :meth:`resolve` but returns the
+        special `missing` value if it cannot be found.
+        """
+        if self._legacy_resolve_mode:
+            rv = self.resolve(key)
+            if isinstance(rv, Undefined):
+                rv = missing
+            return rv
+        return resolve_or_missing(self, key)
+
+    def get_exported(self):
+        """Get a new dict with the exported variables."""
+        return dict((k, self.vars[k]) for k in self.exported_vars)
+
+    def get_all(self):
+        """Return the complete context as dict including the exported
+        variables.  For optimizations reasons this might not return an
+        actual copy so be careful with using it.
+        """
+        if not self.vars:
+            return self.parent
+        if not self.parent:
+            return self.vars
+        return dict(self.parent, **self.vars)
+
+    @internalcode
+    def call(__self, __obj, *args, **kwargs):
+        """Call the callable with the arguments and keyword arguments
+        provided but inject the active context or environment as first
+        argument if the callable is a :func:`contextfunction` or
+        :func:`environmentfunction`.
+        """
+        if __debug__:
+            __traceback_hide__ = True  # noqa
+
+        # Allow callable classes to take a context
+        fn = __obj.__call__
+        for fn_type in ('contextfunction',
+                        'evalcontextfunction',
+                        'environmentfunction'):
+            if hasattr(fn, fn_type):
+                __obj = fn
+                break
+
+        if isinstance(__obj, _context_function_types):
+            if getattr(__obj, 'contextfunction', 0):
+                args = (__self,) + args
+            elif getattr(__obj, 'evalcontextfunction', 0):
+                args = (__self.eval_ctx,) + args
+            elif getattr(__obj, 'environmentfunction', 0):
+                args = (__self.environment,) + args
+        try:
+            return __obj(*args, **kwargs)
+        except StopIteration:
+            return __self.environment.undefined('value was undefined because '
+                                                'a callable raised a '
+                                                'StopIteration exception')
+
+    def derived(self, locals=None):
+        """Internal helper function to create a derived context.  This is
+        used in situations where the system needs a new context in the same
+        template that is independent.
+        """
+        context = new_context(self.environment, self.name, {},
+                              self.get_all(), True, None, locals)
+        context.eval_ctx = self.eval_ctx
+        context.blocks.update((k, list(v)) for k, v in iteritems(self.blocks))
+        return context
+
+    def _all(meth):
+        proxy = lambda self: getattr(self.get_all(), meth)()
+        proxy.__doc__ = getattr(dict, meth).__doc__
+        proxy.__name__ = meth
+        return proxy
+
+    keys = _all('keys')
+    values = _all('values')
+    items = _all('items')
+
+    # not available on python 3
+    if PY2:
+        iterkeys = _all('iterkeys')
+        itervalues = _all('itervalues')
+        iteritems = _all('iteritems')
+    del _all
+
+    def __contains__(self, name):
+        return name in self.vars or name in self.parent
+
+    def __getitem__(self, key):
+        """Lookup a variable or raise `KeyError` if the variable is
+        undefined.
+        """
+        item = self.resolve_or_missing(key)
+        if item is missing:
+            raise KeyError(key)
+        return item
+
+    def __repr__(self):
+        return '<%s %s of %r>' % (
+            self.__class__.__name__,
+            repr(self.get_all()),
+            self.name
+        )
+
+
+# register the context as mapping if possible
+try:
+    from collections import Mapping
+    Mapping.register(Context)
+except ImportError:
+    pass
+
+
+class BlockReference(object):
+    """One block on a template reference."""
+
+    def __init__(self, name, context, stack, depth):
+        self.name = name
+        self._context = context
+        self._stack = stack
+        self._depth = depth
+
+    @property
+    def super(self):
+        """Super the block."""
+        if self._depth + 1 >= len(self._stack):
+            return self._context.environment. \
+                undefined('there is no parent block called %r.' %
+                          self.name, name='super')
+        return BlockReference(self.name, self._context, self._stack,
+                              self._depth + 1)
+
+    @internalcode
+    def __call__(self):
+        rv = concat(self._stack[self._depth](self._context))
+        if self._context.eval_ctx.autoescape:
+            rv = Markup(rv)
+        return rv
+
+
+class LoopContextBase(object):
+    """A loop context for dynamic iteration."""
+
+    _after = _last_iteration
+    _length = None
+
+    def __init__(self, recurse=None, depth0=0):
+        self._recurse = recurse
+        self.index0 = -1
+        self.depth0 = depth0
+
+    def cycle(self, *args):
+        """Cycles among the arguments with the current loop index."""
+        if not args:
+            raise TypeError('no items for cycling given')
+        return args[self.index0 % len(args)]
+
+    first = property(lambda x: x.index0 == 0)
+    last = property(lambda x: x._after is _last_iteration)
+    index = property(lambda x: x.index0 + 1)
+    revindex = property(lambda x: x.length - x.index0)
+    revindex0 = property(lambda x: x.length - x.index)
+    depth = property(lambda x: x.depth0 + 1)
+
+    def __len__(self):
+        return self.length
+
+    @internalcode
+    def loop(self, iterable):
+        if self._recurse is None:
+            raise TypeError('Tried to call non recursive loop.  Maybe you '
+                            "forgot the 'recursive' modifier.")
+        return self._recurse(iterable, self._recurse, self.depth0 + 1)
+
+    # a nifty trick to enhance the error message if someone tried to call
+    # the the loop without or with too many arguments.
+    __call__ = loop
+    del loop
+
+    def __repr__(self):
+        return '<%s %r/%r>' % (
+            self.__class__.__name__,
+            self.index,
+            self.length
+        )
+
+
+class LoopContext(LoopContextBase):
+
+    def __init__(self, iterable, recurse=None, depth0=0):
+        LoopContextBase.__init__(self, recurse, depth0)
+        self._iterator = iter(iterable)
+
+        # try to get the length of the iterable early.  This must be done
+        # here because there are some broken iterators around where there
+        # __len__ is the number of iterations left (i'm looking at your
+        # listreverseiterator!).
+        try:
+            self._length = len(iterable)
+        except (TypeError, AttributeError):
+            self._length = None
+        self._after = self._safe_next()
+
+    @property
+    def length(self):
+        if self._length is None:
+            # if was not possible to get the length of the iterator when
+            # the loop context was created (ie: iterating over a generator)
+            # we have to convert the iterable into a sequence and use the
+            # length of that + the number of iterations so far.
+            iterable = tuple(self._iterator)
+            self._iterator = iter(iterable)
+            iterations_done = self.index0 + 2
+            self._length = len(iterable) + iterations_done
+        return self._length
+
+    def __iter__(self):
+        return LoopContextIterator(self)
+
+    def _safe_next(self):
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            return _last_iteration
+
+
+@implements_iterator
+class LoopContextIterator(object):
+    """The iterator for a loop context."""
+    __slots__ = ('context',)
+
+    def __init__(self, context):
+        self.context = context
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        ctx = self.context
+        ctx.index0 += 1
+        if ctx._after is _last_iteration:
+            raise StopIteration()
+        next_elem = ctx._after
+        ctx._after = ctx._safe_next()
+        return next_elem, ctx
+
+
+class Macro(object):
+    """Wraps a macro function."""
+
+    def __init__(self, environment, func, name, arguments,
+                 catch_kwargs, catch_varargs, caller,
+                 default_autoescape=None):
+        self._environment = environment
+        self._func = func
+        self._argument_count = len(arguments)
+        self.name = name
+        self.arguments = arguments
+        self.catch_kwargs = catch_kwargs
+        self.catch_varargs = catch_varargs
+        self.caller = caller
+        self.explicit_caller = 'caller' in arguments
+        if default_autoescape is None:
+            default_autoescape = environment.autoescape
+        self._default_autoescape = default_autoescape
+
+    @internalcode
+    @evalcontextfunction
+    def __call__(self, *args, **kwargs):
+        # This requires a bit of explanation,  In the past we used to
+        # decide largely based on compile-time information if a macro is
+        # safe or unsafe.  While there was a volatile mode it was largely
+        # unused for deciding on escaping.  This turns out to be
+        # problemtic for macros because if a macro is safe or not not so
+        # much depends on the escape mode when it was defined but when it
+        # was used.
+        #
+        # Because however we export macros from the module system and
+        # there are historic callers that do not pass an eval context (and
+        # will continue to not pass one), we need to perform an instance
+        # check here.
+        #
+        # This is considered safe because an eval context is not a valid
+        # argument to callables otherwise anwyays.  Worst case here is
+        # that if no eval context is passed we fall back to the compile
+        # time autoescape flag.
+        if args and isinstance(args[0], EvalContext):
+            autoescape = args[0].autoescape
+            args = args[1:]
+        else:
+            autoescape = self._default_autoescape
+
+        # try to consume the positional arguments
+        arguments = list(args[:self._argument_count])
+        off = len(arguments)
+
+        # For information why this is necessary refer to the handling
+        # of caller in the `macro_body` handler in the compiler.
+        found_caller = False
+
+        # if the number of arguments consumed is not the number of
+        # arguments expected we start filling in keyword arguments
+        # and defaults.
+        if off != self._argument_count:
+            for idx, name in enumerate(self.arguments[len(arguments):]):
+                try:
+                    value = kwargs.pop(name)
+                except KeyError:
+                    value = missing
+                if name == 'caller':
+                    found_caller = True
+                arguments.append(value)
+        else:
+            found_caller = self.explicit_caller
+
+        # it's important that the order of these arguments does not change
+        # if not also changed in the compiler's `function_scoping` method.
+        # the order is caller, keyword arguments, positional arguments!
+        if self.caller and not found_caller:
+            caller = kwargs.pop('caller', None)
+            if caller is None:
+                caller = self._environment.undefined('No caller defined',
+                                                     name='caller')
+            arguments.append(caller)
+
+        if self.catch_kwargs:
+            arguments.append(kwargs)
+        elif kwargs:
+            if 'caller' in kwargs:
+                raise TypeError('macro %r was invoked with two values for '
+                                'the special caller argument.  This is '
+                                'most likely a bug.' % self.name)
+            raise TypeError('macro %r takes no keyword argument %r' %
+                            (self.name, next(iter(kwargs))))
+        if self.catch_varargs:
+            arguments.append(args[self._argument_count:])
+        elif len(args) > self._argument_count:
+            raise TypeError('macro %r takes not more than %d argument(s)' %
+                            (self.name, len(self.arguments)))
+
+        return self._invoke(arguments, autoescape)
+
+    def _invoke(self, arguments, autoescape):
+        """This method is being swapped out by the async implementation."""
+        rv = self._func(*arguments)
+        if autoescape:
+            rv = Markup(rv)
+        return rv
+
+    def __repr__(self):
+        return '<%s %s>' % (
+            self.__class__.__name__,
+            self.name is None and 'anonymous' or repr(self.name)
+        )
+
+
+@implements_to_string
+class Undefined(object):
+    """The default undefined type.  This undefined type can be printed and
+    iterated over, but every other access will raise an :exc:`jinja2.exceptions.UndefinedError`:
+
+    >>> foo = Undefined(name='foo')
+    >>> str(foo)
+    ''
+    >>> not foo
+    True
+    >>> foo + 42
+    Traceback (most recent call last):
+      ...
+    jinja2.exceptions.UndefinedError: 'foo' is undefined
+    """
+    __slots__ = ('_undefined_hint', '_undefined_obj', '_undefined_name',
+                 '_undefined_exception')
+
+    def __init__(self, hint=None, obj=missing, name=None, exc=UndefinedError):
+        self._undefined_hint = hint
+        self._undefined_obj = obj
+        self._undefined_name = name
+        self._undefined_exception = exc
+
+    @internalcode
+    def _fail_with_undefined_error(self, *args, **kwargs):
+        """Regular callback function for undefined objects that raises an
+        `jinja2.exceptions.UndefinedError` on call.
+        """
+        if self._undefined_hint is None:
+            if self._undefined_obj is missing:
+                hint = '%r is undefined' % self._undefined_name
+            elif not isinstance(self._undefined_name, string_types):
+                hint = '%s has no element %r' % (
+                    object_type_repr(self._undefined_obj),
+                    self._undefined_name
+                )
+            else:
+                hint = '%r has no attribute %r' % (
+                    object_type_repr(self._undefined_obj),
+                    self._undefined_name
+                )
+        else:
+            hint = self._undefined_hint
+        raise self._undefined_exception(hint)
+
+    @internalcode
+    def __getattr__(self, name):
+        if name[:2] == '__':
+            raise AttributeError(name)
+        return self._fail_with_undefined_error()
+
+    __add__ = __radd__ = __mul__ = __rmul__ = __div__ = __rdiv__ = \
+        __truediv__ = __rtruediv__ = __floordiv__ = __rfloordiv__ = \
+        __mod__ = __rmod__ = __pos__ = __neg__ = __call__ = \
+        __getitem__ = __lt__ = __le__ = __gt__ = __ge__ = __int__ = \
+        __float__ = __complex__ = __pow__ = __rpow__ = __sub__ = \
+        __rsub__ = _fail_with_undefined_error
+
+    def __eq__(self, other):
+        return type(self) is type(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return id(type(self))
+
+    def __str__(self):
+        return u''
+
+    def __len__(self):
+        return 0
+
+    def __iter__(self):
+        if 0:
+            yield None
+
+    def __nonzero__(self):
+        return False
+    __bool__ = __nonzero__
+
+    def __repr__(self):
+        return 'Undefined'
+
+
+def make_logging_undefined(logger=None, base=None):
+    """Given a logger object this returns a new undefined class that will
+    log certain failures.  It will log iterations and printing.  If no
+    logger is given a default logger is created.
+
+    Example::
+
+        logger = logging.getLogger(__name__)
+        LoggingUndefined = make_logging_undefined(
+            logger=logger,
+            base=Undefined
+        )
+
+    .. versionadded:: 2.8
+
+    :param logger: the logger to use.  If not provided, a default logger
+                   is created.
+    :param base: the base class to add logging functionality to.  This
+                 defaults to :class:`Undefined`.
+    """
+    if logger is None:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.addHandler(logging.StreamHandler(sys.stderr))
+    if base is None:
+        base = Undefined
+
+    def _log_message(undef):
+        if undef._undefined_hint is None:
+            if undef._undefined_obj is missing:
+                hint = '%s is undefined' % undef._undefined_name
+            elif not isinstance(undef._undefined_name, string_types):
+                hint = '%s has no element %s' % (
+                    object_type_repr(undef._undefined_obj),
+                    undef._undefined_name)
+            else:
+                hint = '%s has no attribute %s' % (
+                    object_type_repr(undef._undefined_obj),
+                    undef._undefined_name)
+        else:
+            hint = undef._undefined_hint
+        logger.warning('Template variable warning: %s', hint)
+
+    class LoggingUndefined(base):
+
+        def _fail_with_undefined_error(self, *args, **kwargs):
+            try:
+                return base._fail_with_undefined_error(self, *args, **kwargs)
+            except self._undefined_exception as e:
+                logger.error('Template variable error: %s', str(e))
+                raise e
+
+        def __str__(self):
+            rv = base.__str__(self)
+            _log_message(self)
+            return rv
+
+        def __iter__(self):
+            rv = base.__iter__(self)
+            _log_message(self)
+            return rv
+
+        if PY2:
+            def __nonzero__(self):
+                rv = base.__nonzero__(self)
+                _log_message(self)
+                return rv
+
+            def __unicode__(self):
+                rv = base.__unicode__(self)
+                _log_message(self)
+                return rv
+        else:
+            def __bool__(self):
+                rv = base.__bool__(self)
+                _log_message(self)
+                return rv
+
+    return LoggingUndefined
+
+
+@implements_to_string
+class DebugUndefined(Undefined):
+    """An undefined that returns the debug info when printed.
+
+    >>> foo = DebugUndefined(name='foo')
+    >>> str(foo)
+    '{{ foo }}'
+    >>> not foo
+    True
+    >>> foo + 42
+    Traceback (most recent call last):
+      ...
+    jinja2.exceptions.UndefinedError: 'foo' is undefined
+    """
+    __slots__ = ()
+
+    def __str__(self):
+        if self._undefined_hint is None:
+            if self._undefined_obj is missing:
+                return u'{{ %s }}' % self._undefined_name
+            return '{{ no such element: %s[%r] }}' % (
+                object_type_repr(self._undefined_obj),
+                self._undefined_name
+            )
+        return u'{{ undefined value printed: %s }}' % self._undefined_hint
+
+
+@implements_to_string
+class StrictUndefined(Undefined):
+    """An undefined that barks on print and iteration as well as boolean
+    tests and all kinds of comparisons.  In other words: you can do nothing
+    with it except checking if it's defined using the `defined` test.
+
+    >>> foo = StrictUndefined(name='foo')
+    >>> str(foo)
+    Traceback (most recent call last):
+      ...
+    jinja2.exceptions.UndefinedError: 'foo' is undefined
+    >>> not foo
+    Traceback (most recent call last):
+      ...
+    jinja2.exceptions.UndefinedError: 'foo' is undefined
+    >>> foo + 42
+    Traceback (most recent call last):
+      ...
+    jinja2.exceptions.UndefinedError: 'foo' is undefined
+    """
+    __slots__ = ()
+    __iter__ = __str__ = __len__ = __nonzero__ = __eq__ = \
+        __ne__ = __bool__ = __hash__ = \
+        Undefined._fail_with_undefined_error
+
+
+# remove remaining slots attributes, after the metaclass did the magic they
+# are unneeded and irritating as they contain wrong data for the subclasses.
+del Undefined.__slots__, DebugUndefined.__slots__, StrictUndefined.__slots__
+
+
+
+
+
+"""
+    jinja2.loaders
+    ~~~~~~~~~~~~~~
+
+    Jinja loader classes.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+import os
+import sys
+import weakref
+from types import ModuleType
+from os import path
+from hashlib import sha1
+# from jinja2.exceptions import TemplateNotFound
+# from jinja2.utils import open_if_exists, internalcode
+# from jinja2._compat import string_types, iteritems
+
+
+def split_template_path(template):
+    """Split a path into segments and perform a sanity check.  If it detects
+    '..' in the path it will raise a `TemplateNotFound` error.
+    """
+    pieces = []
+    for piece in template.split('/'):
+        if path.sep in piece \
+                or (path.altsep and path.altsep in piece) or \
+                        piece == path.pardir:
+            raise TemplateNotFound(template)
+        elif piece and piece != '.':
+            pieces.append(piece)
+    return pieces
+
+
+class BaseLoader(object):
+    """Baseclass for all loaders.  Subclass this and override `get_source` to
+    implement a custom loading mechanism.  The environment provides a
+    `get_template` method that calls the loader's `load` method to get the
+    :class:`Template` object.
+
+    A very basic example for a loader that looks up templates on the file
+    system could look like this::
+
+        from jinja2 import BaseLoader, TemplateNotFound
+        from os.path import join, exists, getmtime
+
+        class MyLoader(BaseLoader):
+
+            def __init__(self, path):
+                self.path = path
+
+            def get_source(self, environment, template):
+                path = join(self.path, template)
+                if not exists(path):
+                    raise TemplateNotFound(template)
+                mtime = getmtime(path)
+                with file(path) as f:
+                    source = f.read().decode('utf-8')
+                return source, path, lambda: mtime == getmtime(path)
+    """
+
+    #: if set to `False` it indicates that the loader cannot provide access
+    #: to the source of templates.
+    #:
+    #: .. versionadded:: 2.4
+    has_source_access = True
+
+    def get_source(self, environment, template):
+        """Get the template source, filename and reload helper for a template.
+        It's passed the environment and template name and has to return a
+        tuple in the form ``(source, filename, uptodate)`` or raise a
+        `TemplateNotFound` error if it can't locate the template.
+
+        The source part of the returned tuple must be the source of the
+        template as unicode string or a ASCII bytestring.  The filename should
+        be the name of the file on the filesystem if it was loaded from there,
+        otherwise `None`.  The filename is used by python for the tracebacks
+        if no loader extension is used.
+
+        The last item in the tuple is the `uptodate` function.  If auto
+        reloading is enabled it's always called to check if the template
+        changed.  No arguments are passed so the function must store the
+        old state somewhere (for example in a closure).  If it returns `False`
+        the template will be reloaded.
+        """
+        if not self.has_source_access:
+            raise RuntimeError('%s cannot provide access to the source' %
+                               self.__class__.__name__)
+        raise TemplateNotFound(template)
+
+    def list_templates(self):
+        """Iterates over all templates.  If the loader does not support that
+        it should raise a :exc:`TypeError` which is the default behavior.
+        """
+        raise TypeError('this loader cannot iterate over all templates')
+
+    @internalcode
+    def load(self, environment, name, globals=None):
+        """Loads a template.  This method looks up the template in the cache
+        or loads one by calling :meth:`get_source`.  Subclasses should not
+        override this method as loaders working on collections of other
+        loaders (such as :class:`PrefixLoader` or :class:`ChoiceLoader`)
+        will not call this method but `get_source` directly.
+        """
+        code = None
+        if globals is None:
+            globals = {}
+
+        # first we try to get the source for this template together
+        # with the filename and the uptodate function.
+        source, filename, uptodate = self.get_source(environment, name)
+
+        # try to load the code from the bytecode cache if there is a
+        # bytecode cache configured.
+        bcc = environment.bytecode_cache
+        if bcc is not None:
+            bucket = bcc.get_bucket(environment, name, filename, source)
+            code = bucket.code
+
+        # if we don't have code so far (not cached, no longer up to
+        # date) etc. we compile the template
+        if code is None:
+            code = environment.compile(source, name, filename)
+
+        # if the bytecode cache is available and the bucket doesn't
+        # have a code so far, we give the bucket the new code and put
+        # it back to the bytecode cache.
+        if bcc is not None and bucket.code is None:
+            bucket.code = code
+            bcc.set_bucket(bucket)
+
+        return environment.template_class.from_code(environment, code,
+                                                    globals, uptodate)
+
+
+class FileSystemLoader(BaseLoader):
+    """Loads templates from the file system.  This loader can find templates
+    in folders on the file system and is the preferred way to load them.
+
+    The loader takes the path to the templates as string, or if multiple
+    locations are wanted a list of them which is then looked up in the
+    given order::
+
+    >>> loader = FileSystemLoader('/path/to/templates')
+    >>> loader = FileSystemLoader(['/path/to/templates', '/other/path'])
+
+    Per default the template encoding is ``'utf-8'`` which can be changed
+    by setting the `encoding` parameter to something else.
+
+    To follow symbolic links, set the *followlinks* parameter to ``True``::
+
+    >>> loader = FileSystemLoader('/path/to/templates', followlinks=True)
+
+    .. versionchanged:: 2.8+
+       The *followlinks* parameter was added.
+    """
+
+    def __init__(self, searchpath, encoding='utf-8', followlinks=False):
+        if isinstance(searchpath, string_types):
+            searchpath = [searchpath]
+        self.searchpath = list(searchpath)
+        self.encoding = encoding
+        self.followlinks = followlinks
+
+    def get_source(self, environment, template):
+        pieces = split_template_path(template)
+        for searchpath in self.searchpath:
+            filename = path.join(searchpath, *pieces)
+            f = open_if_exists(filename)
+            if f is None:
+                continue
+            try:
+                contents = f.read().decode(self.encoding)
+            finally:
+                f.close()
+
+            mtime = path.getmtime(filename)
+
+            def uptodate():
+                try:
+                    return path.getmtime(filename) == mtime
+                except OSError:
+                    return False
+            return contents, filename, uptodate
+        raise TemplateNotFound(template)
+
+    def list_templates(self):
+        found = set()
+        for searchpath in self.searchpath:
+            walk_dir = os.walk(searchpath, followlinks=self.followlinks)
+            for dirpath, dirnames, filenames in walk_dir:
+                for filename in filenames:
+                    template = os.path.join(dirpath, filename) \
+                        [len(searchpath):].strip(os.path.sep) \
+                        .replace(os.path.sep, '/')
+                    if template[:2] == './':
+                        template = template[2:]
+                    if template not in found:
+                        found.add(template)
+        return sorted(found)
+
+
+class PackageLoader(BaseLoader):
+    """Load templates from python eggs or packages.  It is constructed with
+    the name of the python package and the path to the templates in that
+    package::
+
+        loader = PackageLoader('mypackage', 'views')
+
+    If the package path is not given, ``'templates'`` is assumed.
+
+    Per default the template encoding is ``'utf-8'`` which can be changed
+    by setting the `encoding` parameter to something else.  Due to the nature
+    of eggs it's only possible to reload templates if the package was loaded
+    from the file system and not a zip file.
+    """
+
+    def __init__(self, package_name, package_path='templates',
+                 encoding='utf-8'):
+        from pkg_resources import DefaultProvider, ResourceManager, \
+            get_provider
+        provider = get_provider(package_name)
+        self.encoding = encoding
+        self.manager = ResourceManager()
+        self.filesystem_bound = isinstance(provider, DefaultProvider)
+        self.provider = provider
+        self.package_path = package_path
+
+    def get_source(self, environment, template):
+        pieces = split_template_path(template)
+        p = '/'.join((self.package_path,) + tuple(pieces))
+        if not self.provider.has_resource(p):
+            raise TemplateNotFound(template)
+
+        filename = uptodate = None
+        if self.filesystem_bound:
+            filename = self.provider.get_resource_filename(self.manager, p)
+            mtime = path.getmtime(filename)
+            def uptodate():
+                try:
+                    return path.getmtime(filename) == mtime
+                except OSError:
+                    return False
+
+        source = self.provider.get_resource_string(self.manager, p)
+        return source.decode(self.encoding), filename, uptodate
+
+    def list_templates(self):
+        path = self.package_path
+        if path[:2] == './':
+            path = path[2:]
+        elif path == '.':
+            path = ''
+        offset = len(path)
+        results = []
+        def _walk(path):
+            for filename in self.provider.resource_listdir(path):
+                fullname = path + '/' + filename
+                if self.provider.resource_isdir(fullname):
+                    _walk(fullname)
+                else:
+                    results.append(fullname[offset:].lstrip('/'))
+        _walk(path)
+        results.sort()
+        return results
+
+
+class DictLoader(BaseLoader):
+    """Loads a template from a python dict.  It's passed a dict of unicode
+    strings bound to template names.  This loader is useful for unittesting:
+
+    >>> loader = DictLoader({'index.html': 'source here'})
+
+    Because auto reloading is rarely useful this is disabled per default.
+    """
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def get_source(self, environment, template):
+        if template in self.mapping:
+            source = self.mapping[template]
+            return source, None, lambda: source == self.mapping.get(template)
+        raise TemplateNotFound(template)
+
+    def list_templates(self):
+        return sorted(self.mapping)
+
+
+class FunctionLoader(BaseLoader):
+    """A loader that is passed a function which does the loading.  The
+    function receives the name of the template and has to return either
+    an unicode string with the template source, a tuple in the form ``(source,
+    filename, uptodatefunc)`` or `None` if the template does not exist.
+
+    >>> def load_template(name):
+    ...     if name == 'index.html':
+    ...         return '...'
+    ...
+    >>> loader = FunctionLoader(load_template)
+
+    The `uptodatefunc` is a function that is called if autoreload is enabled
+    and has to return `True` if the template is still up to date.  For more
+    details have a look at :meth:`BaseLoader.get_source` which has the same
+    return value.
+    """
+
+    def __init__(self, load_func):
+        self.load_func = load_func
+
+    def get_source(self, environment, template):
+        rv = self.load_func(template)
+        if rv is None:
+            raise TemplateNotFound(template)
+        elif isinstance(rv, string_types):
+            return rv, None, None
+        return rv
+
+
+class PrefixLoader(BaseLoader):
+    """A loader that is passed a dict of loaders where each loader is bound
+    to a prefix.  The prefix is delimited from the template by a slash per
+    default, which can be changed by setting the `delimiter` argument to
+    something else::
+
+        loader = PrefixLoader({
+            'app1':     PackageLoader('mypackage.app1'),
+            'app2':     PackageLoader('mypackage.app2')
+        })
+
+    By loading ``'app1/index.html'`` the file from the app1 package is loaded,
+    by loading ``'app2/index.html'`` the file from the second.
+    """
+
+    def __init__(self, mapping, delimiter='/'):
+        self.mapping = mapping
+        self.delimiter = delimiter
+
+    def get_loader(self, template):
+        try:
+            prefix, name = template.split(self.delimiter, 1)
+            loader = self.mapping[prefix]
+        except (ValueError, KeyError):
+            raise TemplateNotFound(template)
+        return loader, name
+
+    def get_source(self, environment, template):
+        loader, name = self.get_loader(template)
+        try:
+            return loader.get_source(environment, name)
+        except TemplateNotFound:
+            # re-raise the exception with the correct filename here.
+            # (the one that includes the prefix)
+            raise TemplateNotFound(template)
+
+    @internalcode
+    def load(self, environment, name, globals=None):
+        loader, local_name = self.get_loader(name)
+        try:
+            return loader.load(environment, local_name, globals)
+        except TemplateNotFound:
+            # re-raise the exception with the correct filename here.
+            # (the one that includes the prefix)
+            raise TemplateNotFound(name)
+
+    def list_templates(self):
+        result = []
+        for prefix, loader in iteritems(self.mapping):
+            for template in loader.list_templates():
+                result.append(prefix + self.delimiter + template)
+        return result
+
+
+class ChoiceLoader(BaseLoader):
+    """This loader works like the `PrefixLoader` just that no prefix is
+    specified.  If a template could not be found by one loader the next one
+    is tried.
+
+    >>> loader = ChoiceLoader([
+    ...     FileSystemLoader('/path/to/user/templates'),
+    ...     FileSystemLoader('/path/to/system/templates')
+    ... ])
+
+    This is useful if you want to allow users to override builtin templates
+    from a different location.
+    """
+
+    def __init__(self, loaders):
+        self.loaders = loaders
+
+    def get_source(self, environment, template):
+        for loader in self.loaders:
+            try:
+                return loader.get_source(environment, template)
+            except TemplateNotFound:
+                pass
+        raise TemplateNotFound(template)
+
+    @internalcode
+    def load(self, environment, name, globals=None):
+        for loader in self.loaders:
+            try:
+                return loader.load(environment, name, globals)
+            except TemplateNotFound:
+                pass
+        raise TemplateNotFound(name)
+
+    def list_templates(self):
+        found = set()
+        for loader in self.loaders:
+            found.update(loader.list_templates())
+        return sorted(found)
+
+
+class _TemplateModule(ModuleType):
+    """Like a normal module but with support for weak references"""
+
+
+class ModuleLoader(BaseLoader):
+    """This loader loads templates from precompiled templates.
+
+    Example usage:
+
+    >>> loader = ChoiceLoader([
+    ...     ModuleLoader('/path/to/compiled/templates'),
+    ...     FileSystemLoader('/path/to/templates')
+    ... ])
+
+    Templates can be precompiled with :meth:`Environment.compile_templates`.
+    """
+
+    has_source_access = False
+
+    def __init__(self, path):
+        package_name = '_jinja2_module_templates_%x' % id(self)
+
+        # create a fake module that looks for the templates in the
+        # path given.
+        mod = _TemplateModule(package_name)
+        if isinstance(path, string_types):
+            path = [path]
+        else:
+            path = list(path)
+        mod.__path__ = path
+
+        sys.modules[package_name] = weakref.proxy(mod,
+                                                  lambda x: sys.modules.pop(package_name, None))
+
+        # the only strong reference, the sys.modules entry is weak
+        # so that the garbage collector can remove it once the
+        # loader that created it goes out of business.
+        self.module = mod
+        self.package_name = package_name
+
+    @staticmethod
+    def get_template_key(name):
+        return 'tmpl_' + sha1(name.encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def get_module_filename(name):
+        return ModuleLoader.get_template_key(name) + '.py'
+
+    @internalcode
+    def load(self, environment, name, globals=None):
+        key = self.get_template_key(name)
+        module = '%s.%s' % (self.package_name, key)
+        mod = getattr(self.module, module, None)
+        if mod is None:
+            try:
+                mod = __import__(module, None, None, ['root'])
+            except ImportError:
+                raise TemplateNotFound(name)
+
+            # remove the entry from sys.modules, we only want the attribute
+            # on the module object we have stored on the loader.
+            sys.modules.pop(module, None)
+
+        return environment.template_class.from_module_dict(
+            environment, mod.__dict__, globals)
+
+
+
+
+
+
+"""
+    jinja2.debug
+    ~~~~~~~~~~~~
+
+    Implements the debug interface for Jinja.  This module does some pretty
+    ugly stuff with the Python traceback system in order to achieve tracebacks
+    with correct line numbers, locals and contents.
+
+    :copyright: (c) 2017 by the Jinja Team.
+    :license: BSD, see LICENSE for more details.
+"""
+import sys
+import traceback
+from types import TracebackType, CodeType
+# from jinja2.utils import missing, internal_code
+# from jinja2.exceptions import TemplateSyntaxError
+# from jinja2._compat import iteritems, reraise, PY2
+
+# on pypy we can take advantage of transparent proxies
+try:
+    from __pypy__ import tproxy
+except ImportError:
+    tproxy = None
+
+
+# how does the raise helper look like?
+try:
+    exec("raise TypeError, 'foo'")
+except SyntaxError:
+    raise_helper = 'raise __jinja_exception__[1]'
+except TypeError:
+    raise_helper = 'raise __jinja_exception__[0], __jinja_exception__[1]'
+
+
+class TracebackFrameProxy(object):
+    """Proxies a traceback frame."""
+
+    def __init__(self, tb):
+        self.tb = tb
+        self._tb_next = None
+
+    @property
+    def tb_next(self):
+        return self._tb_next
+
+    def set_next(self, next):
+        if tb_set_next is not None:
+            try:
+                tb_set_next(self.tb, next and next.tb or None)
+            except Exception:
+                # this function can fail due to all the hackery it does
+                # on various python implementations.  We just catch errors
+                # down and ignore them if necessary.
+                pass
+        self._tb_next = next
+
+    @property
+    def is_jinja_frame(self):
+        return '__jinja_template__' in self.tb.tb_frame.f_globals
+
+    def __getattr__(self, name):
+        return getattr(self.tb, name)
+
+
+def make_frame_proxy(frame):
+    proxy = TracebackFrameProxy(frame)
+    if tproxy is None:
+        return proxy
+    def operation_handler(operation, *args, **kwargs):
+        if operation in ('__getattribute__', '__getattr__'):
+            return getattr(proxy, args[0])
+        elif operation == '__setattr__':
+            proxy.__setattr__(*args, **kwargs)
+        else:
+            return getattr(proxy, operation)(*args, **kwargs)
+    return tproxy(TracebackType, operation_handler)
+
+
+class ProcessedTraceback(object):
+    """Holds a Jinja preprocessed traceback for printing or reraising."""
+
+    def __init__(self, exc_type, exc_value, frames):
+        assert frames, 'no frames for this traceback?'
+        self.exc_type = exc_type
+        self.exc_value = exc_value
+        self.frames = frames
+
+        # newly concatenate the frames (which are proxies)
+        prev_tb = None
+        for tb in self.frames:
+            if prev_tb is not None:
+                prev_tb.set_next(tb)
+            prev_tb = tb
+        prev_tb.set_next(None)
+
+    def render_as_text(self, limit=None):
+        """Return a string with the traceback."""
+        lines = traceback.format_exception(self.exc_type, self.exc_value,
+                                           self.frames[0], limit=limit)
+        return ''.join(lines).rstrip()
+
+    def render_as_html(self, full=False):
+        """Return a unicode string with the traceback as rendered HTML."""
+        # from jinja2.debugrenderer import render_traceback
+        # return u'%s\n\n<!--\n%s\n-->' % (
+        #     render_traceback(self, full=full),
+        #     self.render_as_text().decode('utf-8', 'replace')
+        # )
+        return 'unknown'
+
+    @property
+    def is_template_syntax_error(self):
+        """`True` if this is a template syntax error."""
+        return isinstance(self.exc_value, TemplateSyntaxError)
+
+    @property
+    def exc_info(self):
+        """Exception info tuple with a proxy around the frame objects."""
+        return self.exc_type, self.exc_value, self.frames[0]
+
+    @property
+    def standard_exc_info(self):
+        """Standard python exc_info for re-raising"""
+        tb = self.frames[0]
+        # the frame will be an actual traceback (or transparent proxy) if
+        # we are on pypy or a python implementation with support for tproxy
+        if type(tb) is not TracebackType:
+            tb = tb.tb
+        return self.exc_type, self.exc_value, tb
+
+
+def make_traceback(exc_info, source_hint=None):
+    """Creates a processed traceback object from the exc_info."""
+    exc_type, exc_value, tb = exc_info
+    if isinstance(exc_value, TemplateSyntaxError):
+        exc_info = translate_syntax_error(exc_value, source_hint)
+        initial_skip = 0
+    else:
+        initial_skip = 1
+    return translate_exception(exc_info, initial_skip)
+
+
+def translate_syntax_error(error, source=None):
+    """Rewrites a syntax error to please traceback systems."""
+    error.source = source
+    error.translated = True
+    exc_info = (error.__class__, error, None)
+    filename = error.filename
+    if filename is None:
+        filename = '<unknown>'
+    return fake_exc_info(exc_info, filename, error.lineno)
+
+
+def translate_exception(exc_info, initial_skip=0):
+    """If passed an exc_info it will automatically rewrite the exceptions
+    all the way down to the correct line numbers and frames.
+    """
+    tb = exc_info[2]
+    frames = []
+
+    # skip some internal frames if wanted
+    for x in range(initial_skip):
+        if tb is not None:
+            tb = tb.tb_next
+    initial_tb = tb
+
+    while tb is not None:
+        # skip frames decorated with @internalcode.  These are internal
+        # calls we can't avoid and that are useless in template debugging
+        # output.
+        if tb.tb_frame.f_code in internal_code:
+            tb = tb.tb_next
+            continue
+
+        # save a reference to the next frame if we override the current
+        # one with a faked one.
+        next = tb.tb_next
+
+        # fake template exceptions
+        template = tb.tb_frame.f_globals.get('__jinja_template__')
+        if template is not None:
+            lineno = template.get_corresponding_lineno(tb.tb_lineno)
+            tb = fake_exc_info(exc_info[:2] + (tb,), template.filename,
+                               lineno)[2]
+
+        frames.append(make_frame_proxy(tb))
+        tb = next
+
+    # if we don't have any exceptions in the frames left, we have to
+    # reraise it unchanged.
+    # XXX: can we backup here?  when could this happen?
+    if not frames:
+        reraise(exc_info[0], exc_info[1], exc_info[2])
+
+    return ProcessedTraceback(exc_info[0], exc_info[1], frames)
+
+
+def get_jinja_locals(real_locals):
+    ctx = real_locals.get('context')
+    if ctx:
+        locals = ctx.get_all()
+    else:
+        locals = {}
+
+    local_overrides = {}
+
+    for name, value in iteritems(real_locals):
+        if not name.startswith('l_') or value is missing:
+            continue
+        try:
+            _, depth, name = name.split('_', 2)
+            depth = int(depth)
+        except ValueError:
+            continue
+        cur_depth = local_overrides.get(name, (-1,))[0]
+        if cur_depth < depth:
+            local_overrides[name] = (depth, value)
+
+    for name, (_, value) in iteritems(local_overrides):
+        if value is missing:
+            locals.pop(name, None)
+        else:
+            locals[name] = value
+
+    return locals
+
+
+def fake_exc_info(exc_info, filename, lineno):
+    """Helper for `translate_exception`."""
+    exc_type, exc_value, tb = exc_info
+
+    # figure the real context out
+    if tb is not None:
+        locals = get_jinja_locals(tb.tb_frame.f_locals)
+
+        # if there is a local called __jinja_exception__, we get
+        # rid of it to not break the debug functionality.
+        locals.pop('__jinja_exception__', None)
+    else:
+        locals = {}
+
+    # assamble fake globals we need
+    globals = {
+        '__name__':             filename,
+        '__file__':             filename,
+        '__jinja_exception__':  exc_info[:2],
+
+        # we don't want to keep the reference to the template around
+        # to not cause circular dependencies, but we mark it as Jinja
+        # frame for the ProcessedTraceback
+        '__jinja_template__':   None
+    }
+
+    # and fake the exception
+    code = compile('\n' * (lineno - 1) + raise_helper, filename, 'exec')
+
+    # if it's possible, change the name of the code.  This won't work
+    # on some python environments such as google appengine
+    try:
+        if tb is None:
+            location = 'template'
+        else:
+            function = tb.tb_frame.f_code.co_name
+            if function == 'root':
+                location = 'top-level template code'
+            elif function.startswith('block_'):
+                location = 'block "%s"' % function[6:]
+            else:
+                location = 'template'
+
+        if PY2:
+            code = CodeType(0, code.co_nlocals, code.co_stacksize,
+                            code.co_flags, code.co_code, code.co_consts,
+                            code.co_names, code.co_varnames, filename,
+                            location, code.co_firstlineno,
+                            code.co_lnotab, (), ())
+        else:
+            code = CodeType(0, code.co_kwonlyargcount,
+                            code.co_nlocals, code.co_stacksize,
+                            code.co_flags, code.co_code, code.co_consts,
+                            code.co_names, code.co_varnames, filename,
+                            location, code.co_firstlineno,
+                            code.co_lnotab, (), ())
+    except Exception as e:
+        pass
+
+    # execute the code and catch the new traceback
+    try:
+        exec(code, globals, locals)
+    except:
+        exc_info = sys.exc_info()
+        new_tb = exc_info[2].tb_next
+
+    # return without this frame
+    return exc_info[:2] + (new_tb,)
+
+
+def _init_ugly_crap():
+    """This function implements a few ugly things so that we can patch the
+    traceback objects.  The function returned allows resetting `tb_next` on
+    any python traceback object.  Do not attempt to use this on non cpython
+    interpreters
+    """
+    import ctypes
+    from types import TracebackType
+
+    if PY2:
+        # figure out size of _Py_ssize_t for Python 2:
+        if hasattr(ctypes.pythonapi, 'Py_InitModule4_64'):
+            _Py_ssize_t = ctypes.c_int64
+        else:
+            _Py_ssize_t = ctypes.c_int
+    else:
+        # platform ssize_t on Python 3
+        _Py_ssize_t = ctypes.c_ssize_t
+
+    # regular python
+    class _PyObject(ctypes.Structure):
+        pass
+    _PyObject._fields_ = [
+        ('ob_refcnt', _Py_ssize_t),
+        ('ob_type', ctypes.POINTER(_PyObject))
+    ]
+
+    # python with trace
+    if hasattr(sys, 'getobjects'):
+        class _PyObject(ctypes.Structure):
+            pass
+        _PyObject._fields_ = [
+            ('_ob_next', ctypes.POINTER(_PyObject)),
+            ('_ob_prev', ctypes.POINTER(_PyObject)),
+            ('ob_refcnt', _Py_ssize_t),
+            ('ob_type', ctypes.POINTER(_PyObject))
+        ]
+
+    class _Traceback(_PyObject):
+        pass
+    _Traceback._fields_ = [
+        ('tb_next', ctypes.POINTER(_Traceback)),
+        ('tb_frame', ctypes.POINTER(_PyObject)),
+        ('tb_lasti', ctypes.c_int),
+        ('tb_lineno', ctypes.c_int)
+    ]
+
+    def tb_set_next(tb, next):
+        """Set the tb_next attribute of a traceback object."""
+        if not (isinstance(tb, TracebackType) and
+                    (next is None or isinstance(next, TracebackType))):
+            raise TypeError('tb_set_next arguments must be traceback objects')
+        obj = _Traceback.from_address(id(tb))
+        if tb.tb_next is not None:
+            old = _Traceback.from_address(id(tb.tb_next))
+            old.ob_refcnt -= 1
+        if next is None:
+            obj.tb_next = ctypes.POINTER(_Traceback)()
+        else:
+            next = _Traceback.from_address(id(next))
+            next.ob_refcnt += 1
+            obj.tb_next = ctypes.pointer(next)
+
+    return tb_set_next
+
+
+# try to get a tb_set_next implementation if we don't have transparent
+# proxies.
+tb_set_next = None
+if tproxy is None:
+    try:
+        tb_set_next = _init_ugly_crap()
+    except:
+        pass
+    del _init_ugly_crap
+
+
+
+
 """
     jinja2.environment
     ~~~~~~~~~~~~~~~~~~
@@ -3982,18 +8574,18 @@ from jinja2 import nodes
 #     LINE_COMMENT_PREFIX, TRIM_BLOCKS, NEWLINE_SEQUENCE, \
 #     DEFAULT_FILTERS, DEFAULT_TESTS, DEFAULT_NAMESPACE, \
 #     DEFAULT_POLICIES, KEEP_TRAILING_NEWLINE, LSTRIP_BLOCKS
-from jinja2.lexer import get_lexer, TokenStream
-from jinja2.parser import Parser
-from jinja2.nodes import EvalContext
-from jinja2.compiler import generate, CodeGenerator
-from jinja2.runtime import Undefined, new_context, Context
-from jinja2.exceptions import TemplateSyntaxError, TemplateNotFound, \
-    TemplatesNotFound, TemplateRuntimeError
-from jinja2.utils import import_string, LRUCache, Markup, missing, \
-    concat, consume, internalcode, have_async_gen
-from jinja2._compat import imap, ifilter, string_types, iteritems, \
-    text_type, reraise, implements_iterator, implements_to_string, \
-    encode_filename, PY2, PYPY
+# from jinja2.lexer import get_lexer, TokenStream
+# from jinja2.parser import Parser
+# from jinja2.nodes import EvalContext
+# from jinja2.compiler import generate, CodeGenerator
+# from jinja2.runtime import Undefined, new_context, Context
+# from jinja2.exceptions import TemplateSyntaxError, TemplateNotFound, \
+#     TemplatesNotFound, TemplateRuntimeError
+# from jinja2.utils import import_string, LRUCache, Markup, missing, \
+#     concat, consume, internalcode, have_async_gen
+# from jinja2._compat import imap, ifilter, string_types, iteritems, \
+#     text_type, reraise, implements_iterator, implements_to_string, \
+#     encode_filename, PY2, PYPY
 
 
 # for direct template usage we have up to ten living environments
@@ -4623,7 +9215,7 @@ class Environment(object):
 
         .. versionadded:: 2.4
         """
-        from jinja2.loaders import ModuleLoader
+        # from jinja2.loaders import ModuleLoader
 
         if log_function is None:
             log_function = lambda x: None
@@ -4733,7 +9325,8 @@ class Environment(object):
         # get any exceptions in template rendering there is no need to load
         # all of that.
         if _make_traceback is None:
-            from jinja2.debug import make_traceback as _make_traceback
+            # from jinja2.debug import make_traceback as _make_traceback
+            _make_traceback = make_traceback
         traceback = _make_traceback(exc_info, source_hint)
         if rendered and self.exception_formatter is not None:
             return self.exception_formatter(traceback)
@@ -5237,3 +9830,9 @@ class TemplateStream(object):
 # hook in default template class.  if anyone reads this comment: ignore that
 # it's possible to use custom templates ;-)
 Environment.template_class = Template
+
+
+
+
+template = Template("hello {{ name }}")
+print template.render(name="jensen")
