@@ -118,6 +118,17 @@ class AutoHomeCar(BaseModel):
         return '[%s]%s' % (self.id, self.card_name)
 
 
+class LianjiaRenting(BaseModel):
+    __tablename__ = 'lianjia_renting'
+    id = Column(Integer, primary_key=True)
+    realm = Column(String(32), index=True)
+    json = Column(Text)
+    create_date = Column(Date, index=True)
+
+    def __repr__(self):
+        return self.id
+
+
 if __name__ == '__main__':
     from config import engine
 
